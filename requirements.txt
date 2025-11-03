@@ -1,0 +1,39 @@
+# Enhanced requirements for Student AI Assistant
+# Original dependencies
+customtkinter>=5.2.0
+sounddevice>=0.4.6
+numpy>=1.24.0
+webrtcvad>=2.0.10
+soundfile>=0.12.1
+torch>=2.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# LangChain and LangGraph dependencies
+langchain>=0.1.0
+langchain-community>=0.0.20
+langchain-core>=0.1.0
+langgraph>=0.0.30
+langchain-ollama>=0.1.0
+
+# Tavily search integration
+langchain-tavily>=0.1.0
+tavily-python>=0.3.0
+
+# NLP libraries for terminology extraction
+nltk>=3.8
+spacy>=3.7.0
+textstat>=0.7.3
+
+# Vector database
+faiss-cpu>=1.7.4
+
+# Additional utilities
+scikit-learn>=1.3.0
+scipy>=1.11.0
+
+# For enhanced lecture summarizer async operations
+aiofiles>=23.0.0
+
+# Note: You might need to download spacy language model:
+# python -m spacy download en_core_web_sm
