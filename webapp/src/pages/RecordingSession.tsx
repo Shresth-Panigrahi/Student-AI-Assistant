@@ -13,6 +13,10 @@ export default function RecordingSession() {
   const { isRecording, transcript, messages, setRecording, appendTranscript, addMessage, clearSession, setProcessing } = useStore()
   const [question, setQuestion] = useState('')
   const [status, setStatus] = useState<'idle' | 'recording' | 'processing'>('idle')
+  const [thinkMode, setThinkMode] = useState(false)
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [sessionName, setSessionName] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
   const transcriptRef = useRef<HTMLDivElement>(null)
   const chatRef = useRef<HTMLDivElement>(null)
   const pulseRef = useRef<HTMLDivElement>(null)
@@ -116,17 +120,34 @@ export default function RecordingSession() {
     }
   }
 
-  const handleSave = async () => {
+  const handleSaveClick = () => {
+    setShowSaveModal(true)
+    setSessionName('') // Reset name
+  }
+
+  const handleSaveConfirm = async () => {
+    if (!sessionName.trim()) {
+      alert('Please enter a session name')
+      return
+    }
+
     try {
+      setIsSaving(true)
       setProcessing(true)
-      await api.saveSession(transcript, messages)
+      
+      console.log('Saving session with name:', sessionName.trim())
+      await api.saveSession(transcript, messages, sessionName.trim())
+      
       // Clear session after saving and navigate away
       clearSession()
       receivedTextsRef.current.clear()
+      setShowSaveModal(false)
       navigate('/history')
     } catch (error) {
       console.error('Failed to save session:', error)
+      alert('Failed to save session')
     } finally {
+      setIsSaving(false)
       setProcessing(false)
     }
   }
@@ -143,7 +164,7 @@ export default function RecordingSession() {
     addMessage(thinkingMessage)
 
     try {
-      const response = await api.askQuestion(question)
+      const response = await api.askQuestion(question, thinkMode)
       
       // Remove thinking message and add real answer
       const messages = useStore.getState().messages
@@ -286,7 +307,7 @@ export default function RecordingSession() {
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={handleSave}
+                onClick={handleSaveClick}
                 disabled={!transcript}
                 className="px-8 py-4 rounded-xl font-bold text-lg flex items-center gap-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
@@ -350,6 +371,21 @@ export default function RecordingSession() {
               </AnimatePresence>
             </div>
 
+            {/* Think Mode Toggle */}
+            <div className="mb-3 flex items-center justify-between px-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={thinkMode}
+                  onChange={(e) => setThinkMode(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-600 bg-dark-800 text-accent-blue focus:ring-accent-blue focus:ring-offset-0"
+                />
+                <span className="text-sm text-gray-400">
+                  {thinkMode ? '🧠 Think Mode (Use AI Knowledge)' : '📄 Transcript Only'}
+                </span>
+              </label>
+            </div>
+
             {/* Question Input */}
             <div className="flex gap-2">
               <input
@@ -357,7 +393,7 @@ export default function RecordingSession() {
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
-                placeholder="Ask a question..."
+                placeholder={thinkMode ? "Ask anything..." : "Ask about the transcript..."}
                 className="flex-1 bg-dark-800 border border-dark-500 rounded-lg px-4 py-2 focus:outline-none focus:border-accent-blue transition-colors"
               />
               <motion.button
@@ -366,9 +402,15 @@ export default function RecordingSession() {
                 onClick={handleAskQuestion}
                 className="p-3 rounded-xl transition-all"
                 style={{
-                  background: 'linear-gradient(135deg, #0066ff 0%, #00bfff 100%)',
-                  boxShadow: '0 0 20px rgba(0,102,255,0.5)',
-                  border: '2px solid rgba(0,191,255,0.3)'
+                  background: thinkMode 
+                    ? 'linear-gradient(135deg, #9333ea 0%, #c084fc 100%)'
+                    : 'linear-gradient(135deg, #0066ff 0%, #00bfff 100%)',
+                  boxShadow: thinkMode
+                    ? '0 0 20px rgba(147,51,234,0.5)'
+                    : '0 0 20px rgba(0,102,255,0.5)',
+                  border: thinkMode
+                    ? '2px solid rgba(192,132,252,0.3)'
+                    : '2px solid rgba(0,191,255,0.3)'
                 }}
               >
                 <Send className="w-6 h-6" />
@@ -377,6 +419,63 @@ export default function RecordingSession() {
           </motion.div>
         </div>
       </div>
+
+      {/* Save Session Modal */}
+      {showSaveModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={() => !isSaving && setShowSaveModal(false)}
+        >
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            className="bg-dark-900 rounded-2xl p-8 max-w-md w-full border-2 border-green-500/30 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Save className="w-8 h-8 text-green-500" />
+              </div>
+              <h2 className="text-2xl font-bold mb-2">Save Session</h2>
+              <p className="text-gray-400">Give your session a name</p>
+            </div>
+
+            <input
+              type="text"
+              value={sessionName}
+              onChange={(e) => setSessionName(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSaveConfirm()}
+              placeholder="e.g., OSI Model Lecture"
+              className="w-full bg-dark-800 border border-dark-500 rounded-lg px-4 py-3 mb-6 focus:outline-none focus:border-green-500 transition-colors text-lg"
+              autoFocus
+            />
+
+            <div className="flex gap-3">
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setShowSaveModal(false)}
+                disabled={isSaving}
+                className="flex-1 px-6 py-3 bg-dark-700 hover:bg-dark-600 rounded-xl font-semibold transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </motion.button>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleSaveConfirm}
+                disabled={isSaving}
+                className="flex-1 px-6 py-3 bg-green-600 hover:bg-green-700 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Save className="w-5 h-5" />
+                {isSaving ? 'Saving...' : 'Save'}
+              </motion.button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
     </div>
   )
 }

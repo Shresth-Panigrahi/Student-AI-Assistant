@@ -30,8 +30,8 @@ export const api = {
     return response.data
   },
   
-  saveSession: async (transcript: string, chat: any[]) => {
-    const response = await axios.post(`${API_BASE}/session/save`, { transcript, chat })
+  saveSession: async (transcript: string, chat: any[], name?: string) => {
+    const response = await axios.post(`${API_BASE}/session/save`, { transcript, chat, name })
     return response.data
   },
   
@@ -46,9 +46,14 @@ export const api = {
     return response.data
   },
   
+  deleteSession: async (id: string) => {
+    const response = await axios.delete(`${API_BASE}/sessions/${id}`)
+    return response.data
+  },
+  
   // Q&A
-  askQuestion: async (question: string) => {
-    const response = await axios.post(`${API_BASE}/qa/ask`, { question })
+  askQuestion: async (question: string, thinkMode: boolean = false) => {
+    const response = await axios.post(`${API_BASE}/qa/ask`, { question, think_mode: thinkMode })
     return response.data
   },
   
@@ -60,6 +65,22 @@ export const api = {
   
   extractTerminologies: async (sessionId: string) => {
     const response = await axios.post(`${API_BASE}/analyze/terminologies`, { sessionId })
+    return response.data
+  },
+  
+  generateQA: async (sessionId: string) => {
+    const response = await axios.post(`${API_BASE}/analyze/qa`, { sessionId })
+    return response.data
+  },
+  
+  // Authentication
+  login: async (username_or_email: string, password: string) => {
+    const response = await axios.post(`${API_BASE}/auth/login`, { username_or_email, password })
+    return response.data
+  },
+  
+  signup: async (data: { name: string; username: string; email: string; password: string }) => {
+    const response = await axios.post(`${API_BASE}/auth/signup`, data)
     return response.data
   },
 }

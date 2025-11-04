@@ -29,13 +29,14 @@ class QAChatbot:
         except:
             return False
     
-    def ask(self, question: str, transcript: str) -> str:
+    def ask(self, question: str, transcript: str, think_mode: bool = False) -> str:
         """
         Ask a question about the transcript
         
         Args:
             question: User's question
             transcript: Current transcript text
+            think_mode: If True, use AI's knowledge. If False, only use transcript.
             
         Returns:
             AI-generated answer based on transcript context
@@ -47,7 +48,7 @@ class QAChatbot:
             return "I don't have enough transcript context yet. Please wait for more transcription or start speaking."
         
         # Create context-aware prompt
-        prompt = self._create_prompt(question, transcript)
+        prompt = self._create_prompt(question, transcript, think_mode)
         
         try:
             # Call Ollama API
@@ -87,7 +88,7 @@ class QAChatbot:
             print(f"❌ Q&A error: {e}")
             return f"Error generating answer: {str(e)}"
     
-    def _create_prompt(self, question: str, transcript: str) -> str:
+    def _create_prompt(self, question: str, transcript: str, think_mode: bool = False) -> str:
         """Create a context-aware prompt for the AI"""
         
         # Limit transcript length to avoid token limits
@@ -96,7 +97,9 @@ class QAChatbot:
             # Take the most recent part
             transcript = "..." + transcript[-max_transcript_length:]
         
-        prompt = f"""You are an AI assistant helping a student understand a lecture. 
+        if think_mode:
+            # Think mode: Use AI's knowledge + transcript
+            prompt = f"""You are an AI assistant helping a student understand a lecture.
 
 LECTURE TRANSCRIPT:
 {transcript}
@@ -105,13 +108,37 @@ STUDENT'S QUESTION:
 {question}
 
 INSTRUCTIONS:
-1. Answer the question based ONLY on the information in the transcript above
-2. If the answer is in the transcript, provide a clear and concise response
-3. If the information is NOT in the transcript, say: "I don't see that information in the current transcript yet."
-4. Be helpful and educational
-5. Keep your answer under 150 words
+1. First, check if the answer is in the transcript
+2. If yes, answer based on the transcript
+3. If no, use your own knowledge to provide a helpful explanation
+4. Relate your answer to the lecture topic when possible
+5. Be clear, educational, and concise (under 200 words)
 
 ANSWER:"""
+        else:
+            # Default mode: ONLY use transcript - STRICT
+            prompt = f"""You are a transcript reader. Your ONLY job is to find answers in the transcript.
+
+LECTURE TRANSCRIPT:
+{transcript}
+
+STUDENT'S QUESTION:
+{question}
+
+STRICT RULES:
+1. Read the transcript carefully
+2. Find the EXACT answer to the question in the transcript
+3. Quote or paraphrase ONLY what is said in the transcript
+4. DO NOT add any information not in the transcript
+5. DO NOT make assumptions or inferences
+6. If the answer is not explicitly in the transcript, say: "That information is not in the transcript yet."
+
+Example:
+- Transcript: "Today we are learning about the OSI reference model"
+- Question: "What are we learning today?"
+- Answer: "We are learning about the OSI reference model."
+
+Now answer the question using ONLY the transcript above:"""
         
         return prompt
     

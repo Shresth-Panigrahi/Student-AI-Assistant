@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowLeft, FileText, Calendar, MessageSquare } from 'lucide-react'
+import { ArrowLeft, FileText, Calendar, MessageSquare, Trash2 } from 'lucide-react'
 import { api } from '@/services/api'
 import { useStore, Session } from '@/store/useStore'
 import { format } from 'date-fns'
@@ -10,6 +10,8 @@ export default function History() {
   const navigate = useNavigate()
   const { sessions, setSessions } = useStore()
   const [loading, setLoading] = useState(true)
+  const [deleteModal, setDeleteModal] = useState<{ id: string; name: string } | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     loadSessions()
@@ -23,6 +25,33 @@ export default function History() {
       console.error('Failed to load sessions:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDeleteClick = (sessionId: string, sessionName: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setDeleteModal({ id: sessionId, name: sessionName })
+  }
+
+  const confirmDelete = async () => {
+    if (!deleteModal) return
+    
+    setDeleting(true)
+    
+    try {
+      await api.deleteSession(deleteModal.id)
+      
+      // Wait for animation
+      await new Promise(resolve => setTimeout(resolve, 800))
+      
+      // Reload sessions
+      await loadSessions()
+      setDeleteModal(null)
+    } catch (error) {
+      console.error('Failed to delete session:', error)
+      alert('Failed to delete session')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -65,29 +94,38 @@ export default function History() {
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             {sessions.map((session, idx) => (
-              <motion.button
+              <motion.div
                 key={session.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.1 }}
                 whileHover={{ scale: 1.05, y: -8 }}
-                onClick={() => navigate(`/transcript/${session.id}`)}
-                className="rounded-2xl p-6 text-left transition-all"
+                className="rounded-2xl p-6 text-left transition-all relative cursor-pointer"
                 style={{
                   background: 'rgba(17, 17, 17, 0.8)',
                   border: '2px solid rgba(0, 102, 255, 0.3)',
                   boxShadow: '0 4px 20px rgba(0, 102, 255, 0.2)'
                 }}
+                onClick={() => navigate(`/transcript/${session.id}`)}
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className="p-3 bg-accent-blue/20 rounded-lg">
                     <FileText className="w-6 h-6 text-accent-blue" />
                   </div>
-                  {session.summary && (
-                    <span className="text-xs bg-accent-green/20 text-accent-green px-2 py-1 rounded">
-                      Analyzed
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {session.summary && (
+                      <span className="text-xs bg-accent-green/20 text-accent-green px-2 py-1 rounded">
+                        Analyzed
+                      </span>
+                    )}
+                    <button
+                      onClick={(e) => handleDeleteClick(session.id, session.name, e)}
+                      className="p-2 bg-red-600/20 hover:bg-red-600/40 rounded-lg transition-colors"
+                      title="Delete session"
+                    >
+                      <Trash2 className="w-4 h-4 text-red-500" />
+                    </button>
+                  </div>
                 </div>
 
                 <h3 className="text-lg font-semibold mb-2">{session.name}</h3>
@@ -108,9 +146,81 @@ export default function History() {
                     {session.transcript.substring(0, 100)}...
                   </p>
                 </div>
-              </motion.button>
+              </motion.div>
             ))}
           </div>
+        )}
+
+        {/* Delete Confirmation Modal */}
+        {deleteModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={() => !deleting && setDeleteModal(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="bg-dark-900 rounded-2xl p-8 max-w-md w-full border-2 border-red-500/30 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {deleting ? (
+                <motion.div
+                  initial={{ scale: 1 }}
+                  animate={{ scale: [1, 1.2, 0], rotate: [0, 0, 180] }}
+                  transition={{ duration: 0.8 }}
+                  className="text-center py-8"
+                >
+                  <motion.div
+                    animate={{ y: [0, -100], opacity: [1, 0] }}
+                    transition={{ duration: 0.8 }}
+                  >
+                    <Trash2 className="w-20 h-20 text-red-500 mx-auto mb-4" />
+                    <p className="text-gray-400">Deleting session...</p>
+                  </motion.div>
+                </motion.div>
+              ) : (
+                <>
+                  <div className="text-center mb-6">
+                    <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Trash2 className="w-8 h-8 text-red-500" />
+                    </div>
+                    <h2 className="text-2xl font-bold mb-2">Delete Session?</h2>
+                    <p className="text-gray-400">
+                      Are you sure you want to delete
+                    </p>
+                    <p className="text-white font-semibold mt-1">"{deleteModal.name}"?</p>
+                    <p className="text-sm text-gray-500 mt-3">
+                      This action cannot be undone. All transcripts, summaries, and analysis will be permanently deleted.
+                    </p>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={() => setDeleteModal(null)}
+                      className="flex-1 px-6 py-3 bg-dark-700 hover:bg-dark-600 rounded-xl font-semibold transition-colors"
+                    >
+                      Cancel
+                    </motion.button>
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={confirmDelete}
+                      className="flex-1 px-6 py-3 bg-red-600 hover:bg-red-700 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                      Delete
+                    </motion.button>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
         )}
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, FileText, Sparkles, BookOpen, Loader } from 'lucide-react'
+import { ArrowLeft, FileText, Sparkles, BookOpen, Loader, Eye, EyeOff } from 'lucide-react'
 import { api } from '@/services/api'
 import { Session } from '@/store/useStore'
 import { format } from 'date-fns'
@@ -11,8 +11,9 @@ export default function TranscriptDetail() {
   const navigate = useNavigate()
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
-  const [analyzing, setAnalyzing] = useState<'summary' | 'terms' | null>(null)
-  const [activeTab, setActiveTab] = useState<'transcript' | 'summary' | 'terms'>('transcript')
+  const [analyzing, setAnalyzing] = useState<'summary' | 'terms' | 'qa' | null>(null)
+  const [activeTab, setActiveTab] = useState<'transcript' | 'summary' | 'terms' | 'qa'>('transcript')
+  const [visibleAnswers, setVisibleAnswers] = useState<Set<number>>(new Set())
 
   useEffect(() => {
     loadSession()
@@ -55,6 +56,33 @@ export default function TranscriptDetail() {
     } finally {
       setAnalyzing(null)
     }
+  }
+
+  const handleGenerateQA = async () => {
+    if (!id) return
+    setAnalyzing('qa')
+    try {
+      const result = await api.generateQA(id)
+      setSession((prev) => prev ? { ...prev, qa: result.qa } : null)
+      setActiveTab('qa')
+      setVisibleAnswers(new Set()) // Hide all answers initially
+    } catch (error) {
+      console.error('Failed to generate Q&A:', error)
+    } finally {
+      setAnalyzing(null)
+    }
+  }
+
+  const toggleAnswer = (index: number) => {
+    setVisibleAnswers((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(index)) {
+        newSet.delete(index)
+      } else {
+        newSet.add(index)
+      }
+      return newSet
+    })
   }
 
   if (loading) {
@@ -110,7 +138,7 @@ export default function TranscriptDetail() {
           >
             {/* Tabs */}
             <div className="flex gap-2 mb-6 border-b border-dark-500">
-              {['transcript', 'summary', 'terms'].map((tab) => (
+              {['transcript', 'summary', 'terms', 'qa'].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab as any)}
@@ -120,7 +148,7 @@ export default function TranscriptDetail() {
                       : 'text-gray-400 hover:text-gray-300'
                   }`}
                 >
-                  {tab === 'terms' ? 'Terminologies' : tab}
+                  {tab === 'terms' ? 'Terminologies' : tab === 'qa' ? 'Q&A' : tab}
                   {activeTab === tab && (
                     <motion.div
                       layoutId="activeTab"
@@ -158,8 +186,40 @@ export default function TranscriptDetail() {
                   className="bg-dark-800 rounded-xl p-6 max-h-[600px] overflow-y-auto"
                 >
                   {session.summary ? (
-                    <div className="prose prose-invert max-w-none">
-                      <p className="text-sm leading-relaxed">{session.summary}</p>
+                    <div className="space-y-4">
+                      {session.summary.split('\n').map((line, index) => {
+                        const trimmed = line.trim()
+                        if (!trimmed) return null
+                        
+                        // Main topic (starts with number)
+                        if (/^\d+\./.test(trimmed)) {
+                          return (
+                            <div key={index} className="mt-6 first:mt-0">
+                              <h3 className="text-lg font-bold text-accent-blue mb-2">
+                                {trimmed}
+                              </h3>
+                            </div>
+                          )
+                        }
+                        
+                        // Subtopic (starts with letter)
+                        if (/^[a-z]\)/.test(trimmed) || /^[a-z]\./.test(trimmed)) {
+                          return (
+                            <div key={index} className="ml-4">
+                              <p className="text-sm text-gray-300 font-medium mb-1">
+                                {trimmed}
+                              </p>
+                            </div>
+                          )
+                        }
+                        
+                        // Regular paragraph
+                        return (
+                          <p key={index} className="text-sm text-gray-300 leading-relaxed ml-4">
+                            {trimmed}
+                          </p>
+                        )
+                      })}
                     </div>
                   ) : (
                     <div className="text-center py-12">
@@ -210,6 +270,69 @@ export default function TranscriptDetail() {
                   )}
                 </motion.div>
               )}
+
+              {activeTab === 'qa' && (
+                <motion.div
+                  key="qa"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="bg-dark-800 rounded-xl p-6 max-h-[600px] overflow-y-auto"
+                >
+                  {session.qa && session.qa.length > 0 ? (
+                    <div className="space-y-6">
+                      {session.qa.map((item: any, index: number) => (
+                        <motion.div
+                          key={index}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.1 }}
+                          className="border border-dark-500 rounded-lg p-4"
+                        >
+                          <div className="flex items-start justify-between gap-2 mb-3">
+                            <div className="flex items-start gap-2 flex-1">
+                              <span className="text-red-500 font-bold text-sm">Q{index + 1}:</span>
+                              <p className="text-white font-medium">{item.question}</p>
+                            </div>
+                            <button
+                              onClick={() => toggleAnswer(index)}
+                              className="p-2 hover:bg-dark-600 rounded-lg transition-colors"
+                              title={visibleAnswers.has(index) ? "Hide answer" : "Show answer"}
+                            >
+                              {visibleAnswers.has(index) ? (
+                                <EyeOff className="w-5 h-5 text-gray-400" />
+                              ) : (
+                                <Eye className="w-5 h-5 text-accent-blue" />
+                              )}
+                            </button>
+                          </div>
+                          <AnimatePresence>
+                            {visibleAnswers.has(index) && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="flex items-start gap-2 pl-6 overflow-hidden"
+                              >
+                                <span className="text-green-500 font-bold text-sm">A:</span>
+                                <p className="text-gray-300 text-sm">{item.answer}</p>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </motion.div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12">
+                      <FileText className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                      <p className="text-gray-400">No Q&A generated yet</p>
+                      <p className="text-sm text-gray-500 mt-2">
+                        Click "Generate Q&A" to create practice questions
+                      </p>
+                    </div>
+                  )}
+                </motion.div>
+              )}
             </AnimatePresence>
           </motion.div>
 
@@ -223,16 +346,21 @@ export default function TranscriptDetail() {
 
             <div className="space-y-4">
               <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+                whileHover={{ scale: session.summary ? 1 : 1.02 }}
+                whileTap={{ scale: session.summary ? 1 : 0.98 }}
                 onClick={handleSummarize}
-                disabled={analyzing === 'summary'}
+                disabled={analyzing === 'summary' || !!session.summary}
                 className="w-full bg-accent-blue hover:bg-accent-blue/80 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
               >
                 {analyzing === 'summary' ? (
                   <>
                     <Loader className="w-5 h-5 animate-spin" />
                     Summarizing...
+                  </>
+                ) : session.summary ? (
+                  <>
+                    <Sparkles className="w-5 h-5" />
+                    ✓ Summary Generated
                   </>
                 ) : (
                   <>
@@ -243,10 +371,10 @@ export default function TranscriptDetail() {
               </motion.button>
 
               <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+                whileHover={{ scale: session.terminologies ? 1 : 1.02 }}
+                whileTap={{ scale: session.terminologies ? 1 : 0.98 }}
                 onClick={handleExtractTerms}
-                disabled={analyzing === 'terms'}
+                disabled={analyzing === 'terms' || !!session.terminologies}
                 className="w-full bg-accent-green hover:bg-accent-green/80 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
               >
                 {analyzing === 'terms' ? (
@@ -254,10 +382,40 @@ export default function TranscriptDetail() {
                     <Loader className="w-5 h-5 animate-spin" />
                     Extracting...
                   </>
+                ) : session.terminologies ? (
+                  <>
+                    <BookOpen className="w-5 h-5" />
+                    ✓ Terms Extracted
+                  </>
                 ) : (
                   <>
                     <BookOpen className="w-5 h-5" />
                     Extract Terminologies
+                  </>
+                )}
+              </motion.button>
+
+              <motion.button
+                whileHover={{ scale: session.qa ? 1 : 1.02 }}
+                whileTap={{ scale: session.qa ? 1 : 0.98 }}
+                onClick={handleGenerateQA}
+                disabled={analyzing === 'qa' || !!session.qa}
+                className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
+              >
+                {analyzing === 'qa' ? (
+                  <>
+                    <Loader className="w-5 h-5 animate-spin" />
+                    Generating...
+                  </>
+                ) : session.qa ? (
+                  <>
+                    <FileText className="w-5 h-5" />
+                    ✓ Q&A Generated
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-5 h-5" />
+                    Generate Q&A
                   </>
                 )}
               </motion.button>
@@ -284,6 +442,14 @@ export default function TranscriptDetail() {
                   <span className="text-gray-400">Terms Extracted</span>
                   <span className="text-accent-green font-semibold">
                     {Object.keys(session.terminologies).length}
+                  </span>
+                </div>
+              )}
+              {session.qa && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Q&A Generated</span>
+                  <span className="text-red-500 font-semibold">
+                    {session.qa.length} questions
                   </span>
                 </div>
               )}

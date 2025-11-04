@@ -14,6 +14,7 @@ export interface Session {
   chat: Message[]
   summary?: string
   terminologies?: Record<string, any>
+  qa?: Array<{ question: string; answer: string }>
 }
 
 interface AppState {
