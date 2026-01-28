@@ -1,33 +1,36 @@
 """
-Real-time Q&A Chatbot using Ollama
+Real-time Q&A Chatbot using Google Gemini API
 Analyzes transcript and answers questions based on context
 """
-import requests
-import json
+import os
+import google.generativeai as genai
 from typing import Optional, List, Dict
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 class QAChatbot:
-    """Q&A Chatbot that answers questions based on transcript context"""
+    """Q&A Chatbot that answers questions based on transcript context using Gemini"""
     
-    def __init__(self, model: str = "llama3.2:1b", ollama_url: str = "http://localhost:11434"):
-        self.model = model
-        self.ollama_url = ollama_url
+    def __init__(self, model_name: str = "gemini-2.0-flash-exp"):
+        self.model_name = model_name
         self.conversation_history: List[Dict[str, str]] = []
         
-        # Check if Ollama is available
-        self.available = self._check_ollama()
-        if self.available:
-            print(f"✅ Ollama chatbot ready with model: {self.model}")
+        # Configure Gemini
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            print("⚠️  GEMINI_API_KEY not found in environment variables")
+            self.available = False
         else:
-            print(f"⚠️  Ollama not available at {self.ollama_url}")
-    
-    def _check_ollama(self) -> bool:
-        """Check if Ollama is running"""
-        try:
-            response = requests.get(f"{self.ollama_url}/api/tags", timeout=2)
-            return response.status_code == 200
-        except:
-            return False
+            try:
+                genai.configure(api_key=api_key)
+                self.model = genai.GenerativeModel(self.model_name)
+                self.available = True
+                print(f"✅ Gemini chatbot ready with model: {self.model_name}")
+            except Exception as e:
+                print(f"❌ Failed to configure Gemini: {e}")
+                self.available = False
     
     def ask(self, question: str, transcript: str, think_mode: bool = False) -> str:
         """
@@ -42,7 +45,7 @@ class QAChatbot:
             AI-generated answer based on transcript context
         """
         if not self.available:
-            return "Ollama is not available. Please start Ollama with: ollama serve"
+            return "Gemini API is not available. Please checking your GEMINI_API_KEY in .env file."
         
         if not transcript or len(transcript.strip()) < 10:
             return "I don't have enough transcript context yet. Please wait for more transcription or start speaking."
@@ -51,39 +54,19 @@ class QAChatbot:
         prompt = self._create_prompt(question, transcript, think_mode)
         
         try:
-            # Call Ollama API
-            response = requests.post(
-                f"{self.ollama_url}/api/generate",
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.7,
-                        "top_p": 0.9,
-                        "max_tokens": 500
-                    }
-                },
-                timeout=30
-            )
+            # Generate response
+            response = self.model.generate_content(prompt)
+            answer = response.text.strip()
             
-            if response.status_code == 200:
-                result = response.json()
-                answer = result.get("response", "").strip()
+            # Store in conversation history
+            self.conversation_history.append({
+                "question": question,
+                "answer": answer
+            })
+            
+            print(f"✅ Q&A: {question[:50]}... → {answer[:50]}...")
+            return answer
                 
-                # Store in conversation history
-                self.conversation_history.append({
-                    "question": question,
-                    "answer": answer
-                })
-                
-                print(f"✅ Q&A: {question[:50]}... → {answer[:50]}...")
-                return answer
-            else:
-                return f"Error: Ollama returned status {response.status_code}"
-                
-        except requests.exceptions.Timeout:
-            return "Request timed out. The model might be processing. Please try again."
         except Exception as e:
             print(f"❌ Q&A error: {e}")
             return f"Error generating answer: {str(e)}"
@@ -91,16 +74,10 @@ class QAChatbot:
     def _create_prompt(self, question: str, transcript: str, think_mode: bool = False) -> str:
         """Create a context-aware prompt for the AI"""
         
-        # Limit transcript length to avoid token limits
-        max_transcript_length = 2000
-        if len(transcript) > max_transcript_length:
-            # Take the most recent part
-            transcript = "..." + transcript[-max_transcript_length:]
-        
         if think_mode:
             # Think mode: Use AI's knowledge + transcript
             prompt = f"""You are an AI assistant helping a student understand a lecture.
-
+            
 LECTURE TRANSCRIPT:
 {transcript}
 
@@ -162,6 +139,8 @@ def get_chatbot() -> QAChatbot:
     return _chatbot
 
 def is_ollama_available() -> bool:
-    """Check if Ollama is available"""
+    """Check if Gemini is available (renamed logic but keeping function name for compatibility if needed, though we should update callers)"""
+    # Note: We should update callers to use is_gemini_available or similar, 
+    # but for now we map this to the chatbot availability to minimize friction
     chatbot = get_chatbot()
     return chatbot.available

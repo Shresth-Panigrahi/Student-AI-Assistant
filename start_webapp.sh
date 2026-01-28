@@ -15,45 +15,73 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Check if Ollama is running
-if ! curl -s http://localhost:11434/api/tags > /dev/null; then
-    echo "⚠️  Ollama is not running. Starting Ollama..."
-    ollama serve &
-    sleep 3
+# Setup Backend
+echo "🔧 Setting up Backend..."
+cd backend
+
+# Create virtual environment if it doesn't exist
+if [ ! -d "venv" ]; then
+    echo "📦 Creating virtual environment..."
+    python3 -m venv venv
 fi
 
-# Install frontend dependencies if needed
-if [ ! -d "webapp/node_modules" ]; then
-    echo "📦 Installing frontend dependencies..."
-    cd webapp
-    npm install
-    cd ..
+# Activate virtual environment
+source venv/bin/activate
+
+# Install dependencies
+if [ -f "requirements.txt" ]; then
+    echo "📦 Installing backend dependencies..."
+    pip install -q -r requirements.txt
 fi
 
-# Install backend dependencies if needed
-echo "📦 Checking Python dependencies..."
-pip install -q -r server/requirements.txt
-pip install -q -r requirements.txt
-
-# Create .env file if it doesn't exist
-if [ ! -f "webapp/.env" ]; then
-    echo "📝 Creating .env file..."
-    cp webapp/.env.example webapp/.env
+# Check for .env file
+if [ ! -f ".env" ]; then
+    echo "⚠️  No .env file found in backend. Creating from example if available..."
+    if [ -f ".env.example" ]; then
+        cp .env.example .env
+        echo "✅ Created .env from example. Please update with your API keys."
+    else
+        echo "❌ No .env.example found. Please create .env manually."
+    fi
 fi
 
-# Start backend server in background
-echo "🔧 Starting Flask backend server..."
-cd server
-python3 app.py &
+# Check for GEMINI_API_KEY
+if ! grep -q "GEMINI_API_KEY" .env; then
+    echo "⚠️  GEMINI_API_KEY not found in backend/.env. AI features might not work."
+fi
+
+# Start Backend Server
+echo "🚀 Starting FastAPI backend server..."
+python3 main.py &
 BACKEND_PID=$!
 cd ..
 
-# Wait for backend to start
+# Wait for backend to initialize
+echo "⏳ Waiting for backend to start..."
 sleep 3
 
-# Start frontend development server
-echo "🎨 Starting React frontend..."
+# Setup Frontend
+echo "🎨 Setting up Frontend..."
 cd webapp
+
+# Install dependencies if needed
+if [ ! -d "node_modules" ]; then
+    echo "📦 Installing frontend dependencies..."
+    npm install
+fi
+
+# Check for .env file
+if [ ! -f ".env" ]; then
+    echo "📝 Creating frontend .env file..."
+    if [ -f ".env.example" ]; then
+        cp .env.example .env
+    else
+        echo "VITE_API_URL=http://localhost:8000" > .env
+    fi
+fi
+
+# Start Frontend
+echo "🚀 Starting Vite frontend..."
 npm run dev &
 FRONTEND_PID=$!
 cd ..
@@ -61,8 +89,8 @@ cd ..
 echo ""
 echo "✅ Application started successfully!"
 echo "================================================"
-echo "Frontend: http://localhost:3000"
-echo "Backend:  http://localhost:5000"
+echo "Backend:  http://localhost:8000"
+echo "Frontend: http://localhost:5173 (or as shown above)"
 echo ""
 echo "Press Ctrl+C to stop all servers"
 echo ""

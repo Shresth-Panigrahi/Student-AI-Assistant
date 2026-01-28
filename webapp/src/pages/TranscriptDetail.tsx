@@ -105,7 +105,7 @@ export default function TranscriptDetail() {
   }
 
   return (
-    <div className="min-h-screen p-6">
+    <div className="min-h-screen p-6 bg-true-black">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <motion.div
@@ -142,11 +142,10 @@ export default function TranscriptDetail() {
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab as any)}
-                  className={`px-4 py-2 font-medium capitalize transition-colors relative ${
-                    activeTab === tab
+                  className={`px-4 py-2 font-medium capitalize transition-colors relative ${activeTab === tab
                       ? 'text-accent-blue'
                       : 'text-gray-400 hover:text-gray-300'
-                  }`}
+                    }`}
                 >
                   {tab === 'terms' ? 'Terminologies' : tab === 'qa' ? 'Q&A' : tab}
                   {activeTab === tab && (
@@ -190,7 +189,7 @@ export default function TranscriptDetail() {
                       {session.summary.split('\n').map((line, index) => {
                         const trimmed = line.trim()
                         if (!trimmed) return null
-                        
+
                         // Main topic (starts with number)
                         if (/^\d+\./.test(trimmed)) {
                           return (
@@ -201,7 +200,7 @@ export default function TranscriptDetail() {
                             </div>
                           )
                         }
-                        
+
                         // Subtopic (starts with letter)
                         if (/^[a-z]\)/.test(trimmed) || /^[a-z]\./.test(trimmed)) {
                           return (
@@ -212,7 +211,7 @@ export default function TranscriptDetail() {
                             </div>
                           )
                         }
-                        
+
                         // Regular paragraph
                         return (
                           <p key={index} className="text-sm text-gray-300 leading-relaxed ml-4">

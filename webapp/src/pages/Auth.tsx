@@ -1,20 +1,20 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { GraduationCap, Mail, Lock, User, UserPlus, LogIn } from 'lucide-react'
+import { Mail, Lock, User, UserPlus, LogIn } from 'lucide-react'
 import { api } from '@/services/api'
 
 export default function Auth() {
   const navigate = useNavigate()
   const [isLogin, setIsLogin] = useState(true)
   const [loading, setLoading] = useState(false)
-  
+
   // Login form
   const [loginData, setLoginData] = useState({
     username_or_email: '',
     password: ''
   })
-  
+
   // Signup form
   const [signupData, setSignupData] = useState({
     name: '',
@@ -22,17 +22,17 @@ export default function Auth() {
     email: '',
     password: ''
   })
-  
+
   const [error, setError] = useState('')
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
-    
+
     try {
       const result = await api.login(loginData.username_or_email, loginData.password)
-      
+
       if (result.success) {
         // Store user data
         localStorage.setItem('user', JSON.stringify(result.user))
@@ -52,10 +52,10 @@ export default function Auth() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    
+
     try {
       const result = await api.signup(signupData)
-      
+
       if (result.success) {
         // Store user data and navigate
         localStorage.setItem('user', JSON.stringify(result.user))
@@ -72,21 +72,24 @@ export default function Auth() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: '#000000' }}>
+    <div className="min-h-screen flex items-center justify-center p-6 bg-true-black">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md"
       >
         {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="w-20 h-20 bg-accent-blue/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <GraduationCap className="w-12 h-12 text-accent-blue" />
+        {/* Logo */}
+        <div className="flex flex-row items-center justify-center gap-6 mb-8">
+          <div className="w-24 h-24 flex items-center justify-center">
+            <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
           </div>
-          <h1 className="text-3xl font-bold mb-2">
-            AI Student <span className="text-accent-blue">Assistant</span>
-          </h1>
-          <p className="text-gray-400">Intelligent Lecture Transcription & Analysis</p>
+          <div className="text-left">
+            <h1 className="text-3xl font-bold mb-1 whitespace-nowrap">
+              Student AI <span className="text-accent-blue">Assistant</span>
+            </h1>
+            <p className="text-gray-400 text-sm">Intelligent Lecture Transcription</p>
+          </div>
         </div>
 
         {/* Auth Card */}
@@ -95,17 +98,15 @@ export default function Auth() {
           <div className="flex gap-2 mb-6 p-1 bg-dark-800 rounded-lg">
             <button
               onClick={() => setIsLogin(true)}
-              className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
-                isLogin ? 'bg-accent-blue text-white' : 'text-gray-400'
-              }`}
+              className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${isLogin ? 'bg-accent-blue text-white' : 'text-gray-400'
+                }`}
             >
               Login
             </button>
             <button
               onClick={() => setIsLogin(false)}
-              className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
-                !isLogin ? 'bg-accent-blue text-white' : 'text-gray-400'
-              }`}
+              className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${!isLogin ? 'bg-accent-blue text-white' : 'text-gray-400'
+                }`}
             >
               Sign Up
             </button>

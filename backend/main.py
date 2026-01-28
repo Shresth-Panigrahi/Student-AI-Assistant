@@ -9,6 +9,14 @@ import asyncio
 import uvicorn
 import hashlib
 import re
+from dotenv import load_dotenv
+import google.generativeai as genai
+
+load_dotenv()
+try:
+    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+except:
+    pass
 
 # Import database module
 import database as db
@@ -236,8 +244,6 @@ async def save_session(request: SaveSessionRequest):
         try:
             print(f"🔄 Refining transcript ({len(request.transcript)} chars)...")
             
-            import requests
-            
             prompt = f"""You are a professional transcript editor. Clean up this lecture transcript by removing ALL repetitions and errors.
 
 STRICT RULES:
@@ -270,44 +276,27 @@ Now clean this transcript. Remove ALL repetitions and merge similar content:
 
 CLEANED TRANSCRIPT:"""
             
-            response = requests.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": "llama3.2:1b",
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.2,
-                        "top_p": 0.9,
-                        "num_predict": 3000
-                    }
-                },
-                timeout=60
-            )
+            model = genai.GenerativeModel("gemini-2.0-flash-exp")
+            response = model.generate_content(prompt)
+            refined_transcript = response.text.strip()
             
-            if response.status_code == 200:
-                result = response.json()
-                refined_transcript = result.get("response", "").strip()
-                
-                # Remove common LLM prefixes
-                prefixes_to_remove = [
-                    "Here is the cleaned transcript:",
-                    "Here's the cleaned transcript:",
-                    "Cleaned transcript:",
-                    "CLEANED TRANSCRIPT:",
-                    "The cleaned transcript is:",
-                ]
-                
-                for prefix in prefixes_to_remove:
-                    if refined_transcript.startswith(prefix):
-                        refined_transcript = refined_transcript[len(prefix):].strip()
-                        break
-                
-                print(f"✅ Transcript refined: {len(refined_transcript)} chars")
-                print(f"📝 Original: {request.transcript[:100]}...")
-                print(f"✨ Refined: {refined_transcript[:100]}...")
-            else:
-                print(f"⚠️ Refinement failed (status {response.status_code}), using original transcript")
+            # Remove common LLM prefixes
+            prefixes_to_remove = [
+                "Here is the cleaned transcript:",
+                "Here's the cleaned transcript:",
+                "Cleaned transcript:",
+                "CLEANED TRANSCRIPT:",
+                "The cleaned transcript is:",
+            ]
+            
+            for prefix in prefixes_to_remove:
+                if refined_transcript.startswith(prefix):
+                    refined_transcript = refined_transcript[len(prefix):].strip()
+                    break
+            
+            print(f"✅ Transcript refined: {len(refined_transcript)} chars")
+            print(f"📝 Original: {request.transcript[:100]}...")
+            print(f"✨ Refined: {refined_transcript[:100]}...")
                 
         except Exception as e:
             print(f"❌ Refinement error: {e}, using original transcript")
@@ -401,16 +390,14 @@ async def summarize_transcript(request: AnalyzeRequest):
             "message": "Transcript too short to summarize"
         }
     
-    # Check if Ollama is available
+    # Check if Gemini is available
     if not is_ollama_available():
         return {
             "success": False,
-            "message": "Ollama not available"
+            "message": "Gemini API not available. Check GEMINI_API_KEY."
         }
     
     try:
-        import requests
-        
         # Create the prompt
         prompt = f"""You are an AI assistant integrated into a real-time lecture transcription system. Your job is to summarize spoken transcripts into clean, readable summaries.
 
@@ -456,37 +443,21 @@ Now generate the summary in plain text format without any markdown or special ch
         
         print(f"🔄 Generating summary for transcript ({len(transcript)} chars)...")
         
-        # Call Ollama
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "llama3.2:1b",
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.5,
-                    "max_tokens": 2000
-                }
-            },
-            timeout=120
-        )
+        # Call Gemini
+        model = genai.GenerativeModel("gemini-1.5-flash") # Use Flash for summarization speed
+        response = model.generate_content(prompt)
+        summary = response.text.strip()
         
-        if response.status_code == 200:
-            result = response.json()
-            summary = result.get("response", "").strip()
-            
-            print(f"✅ Summary generated: {len(summary)} chars")
-            
-            # Save to database
-            db.update_session_summary(request.sessionId, summary)
-            
-            return {
-                "success": True,
-                "summary": summary,
-                "metadata": {"mode": "summary"}
-            }
-        else:
-            raise Exception(f"Ollama returned status {response.status_code}")
+        print(f"✅ Summary generated: {len(summary)} chars")
+        
+        # Save to database
+        db.update_session_summary(request.sessionId, summary)
+        
+        return {
+            "success": True,
+            "summary": summary,
+            "metadata": {"mode": "summary"}
+        }
             
     except Exception as e:
         print(f"❌ Summarization error: {e}")
@@ -512,16 +483,14 @@ async def extract_terminologies(request: AnalyzeRequest):
             "message": "Transcript too short to extract terminologies"
         }
     
-    # Check if Ollama is available
+    # Check if Gemini is available
     if not is_ollama_available():
         return {
             "success": False,
-            "message": "Ollama not available"
+            "message": "Gemini API not available. Check GEMINI_API_KEY."
         }
     
     try:
-        import requests
-        
         # Create the prompt
         prompt = f"""Extract key terms from this lecture transcript and return ONLY a JSON array.
 
@@ -543,93 +512,77 @@ JSON ARRAY:"""
         
         print(f"🔄 Extracting terminologies from transcript ({len(transcript)} chars)...")
         
-        # Call Ollama
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "llama3.2:1b",
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,
-                    "num_predict": 1000
-                }
-            },
-            timeout=120
-        )
+        # Call Gemini
+        model = genai.GenerativeModel("gemini-2.0-flash-exp")
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+            
+        print(f"📝 Raw response: {text[:200]}...")
         
-        if response.status_code == 200:
-            result = response.json()
-            text = result.get("response", "").strip()
+        # Try to parse JSON
+        try:
+            import json
+            import re
             
-            print(f"📝 Raw response: {text[:200]}...")
+            # Use regex to find list
+            json_match = re.search(r'\[.*\]', text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+            else:
+                json_str = text
+                
+            # Clean markdown code blocks if present
+            json_str = json_str.replace("```json", "").replace("```", "").strip()
             
-            # Try to parse JSON
-            try:
-                import json
-                import re
+            terms_list = json.loads(json_str)
+            
+            # Convert to the format expected by database
+            terminologies = {}
+            for idx, item in enumerate(terms_list):
+                term_name = item.get("term", f"term_{idx}")
+                term_key = term_name.lower().replace(" ", "_")
                 
-                # Fix incomplete JSON (add closing bracket if missing)
-                if text.startswith('[') and not text.endswith(']'):
-                    text = text + ']'
-                
-                # Extract JSON array from response
-                json_match = re.search(r'\[.*\]', text, re.DOTALL)
-                if json_match:
-                    terms_list = json.loads(json_match.group())
-                else:
-                    # Fallback: try to parse the whole response
-                    terms_list = json.loads(text)
-                
-                # Convert to the format expected by database
-                terminologies = {}
-                for idx, item in enumerate(terms_list):
-                    term_name = item.get("term", f"term_{idx}")
-                    term_key = term_name.lower().replace(" ", "_")
-                    
-                    terminologies[term_key] = {
-                        "original_term": term_name,
-                        "category": "concept",
-                        "importance": "high",
-                        "subject_area": "Lecture",
-                        "definition": item.get("definition", ""),
-                        "source": "ollama"
-                    }
-                
-                print(f"✅ Extracted {len(terminologies)} terminologies")
-                
-                # Save to database
-                db.add_terminologies(request.sessionId, terminologies)
-                
-                return {
-                    "success": True,
-                    "terminologies": terminologies,
-                    "metadata": {"mode": "terminologies"}
+                terminologies[term_key] = {
+                    "original_term": term_name,
+                    "category": "concept",
+                    "importance": "high",
+                    "subject_area": "Lecture",
+                    "definition": item.get("definition", ""),
+                    "source": "gemini"
                 }
-                
-            except json.JSONDecodeError as e:
-                print(f"❌ JSON parsing error: {e}")
-                print(f"Response was: {text}")
-                
-                # Fallback: create basic terminologies
-                terminologies = {
-                    "extracted_content": {
-                        "original_term": "Extracted Content",
-                        "category": "general",
-                        "importance": "medium",
-                        "subject_area": "Lecture",
-                        "definition": "Key terms could not be parsed. Please try again.",
-                        "source": "fallback"
-                    }
+            
+            print(f"✅ Extracted {len(terminologies)} terminologies")
+            
+            # Save to database
+            db.add_terminologies(request.sessionId, terminologies)
+            
+            return {
+                "success": True,
+                "terminologies": terminologies,
+                "metadata": {"mode": "terminologies"}
+            }
+            
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON parsing error: {e}")
+            print(f"Response was: {text}")
+            
+            # Fallback: create basic terminologies
+            terminologies = {
+                "extracted_content": {
+                    "original_term": "Extracted Content",
+                    "category": "general",
+                    "importance": "medium",
+                    "subject_area": "Lecture",
+                    "definition": "Key terms could not be parsed. Please try again.",
+                    "source": "fallback"
                 }
-                
-                return {
-                    "success": True,
-                    "terminologies": terminologies,
-                    "metadata": {"mode": "terminologies"}
-                }
-        else:
-            raise Exception(f"Ollama returned status {response.status_code}")
+            }
+            
+            return {
+                "success": True,
+                "terminologies": terminologies,
+                "metadata": {"mode": "terminologies"}
+            }
             
     except Exception as e:
         print(f"❌ Terminology extraction error: {e}")
@@ -655,21 +608,17 @@ async def generate_qa(request: AnalyzeRequest):
             "message": "Transcript too short to generate Q&A"
         }
     
-    # Check if Ollama is available
+    # Check if Gemini is available
     if not is_ollama_available():
         return {
             "success": False,
-            "message": "Ollama not available"
+            "message": "Gemini API not available. Check GEMINI_API_KEY."
         }
     
     try:
-        import requests
         import re
         
-        if not is_ollama_available():
-            return {"success": False, "message": "Ollama not available"}
-        
-        print(f"🔄 Generating Q&A using Ollama ({len(transcript)} chars)...")
+        print(f"🔄 Generating Q&A using Gemini ({len(transcript)} chars)...")
         
         # Create simple, direct prompt
         prompt = f"""Read this lecture transcript and generate 5 quiz questions with answers.
@@ -686,27 +635,12 @@ TRANSCRIPT:
 
 Generate 5 Q&A pairs now:"""
         
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": "llama3.2:1b",
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.4,
-                    "num_predict": 1000
-                }
-            },
-            timeout=90
-        )
+        # Call Gemini
+        model = genai.GenerativeModel("gemini-2.0-flash-exp")
+        response = model.generate_content(prompt)
+        text = response.text.strip()
         
-        if response.status_code != 200:
-            return {"success": False, "message": f"Ollama error: {response.status_code}"}
-        
-        result = response.json()
-        text = result.get("response", "").strip()
-        
-        print(f"📝 Ollama response: {text[:300]}...")
+        print(f"📝 Gemini response: {text[:300]}...")
         
         # Parse Q&A pairs with regex
         qa_list = []
