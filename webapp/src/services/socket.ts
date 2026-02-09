@@ -1,16 +1,42 @@
 class WebSocketService {
   private ws: WebSocket | null = null
   private listeners: Map<string, Set<Function>> = new Map()
+  private reconnectAttempts = 0
+  private maxReconnectAttempts = 5
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+  private isConnecting = false
+  private shouldReconnect = true
 
   connect() {
-    this.ws = new WebSocket('ws://localhost:8000/ws')
+    // Prevent multiple simultaneous connection attempts
+    if (this.isConnecting || (this.ws && this.ws.readyState === WebSocket.OPEN)) {
+      return this.ws
+    }
+
+    this.isConnecting = true
+    this.shouldReconnect = true
+
+    try {
+      this.ws = new WebSocket('ws://localhost:8000/ws')
+    } catch (error) {
+      console.error('Failed to create WebSocket:', error)
+      this.isConnecting = false
+      this.scheduleReconnect()
+      return null
+    }
 
     this.ws.onopen = () => {
       console.log('✅ WebSocket connected')
+      this.isConnecting = false
+      this.reconnectAttempts = 0
     }
 
     this.ws.onclose = () => {
       console.log('❌ WebSocket disconnected')
+      this.isConnecting = false
+      if (this.shouldReconnect) {
+        this.scheduleReconnect()
+      }
     }
 
     this.ws.onmessage = (event) => {
@@ -24,12 +50,37 @@ class WebSocketService {
 
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error)
+      this.isConnecting = false
     }
 
     return this.ws
   }
 
+  private scheduleReconnect() {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout)
+    }
+
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log('Max reconnection attempts reached')
+      return
+    }
+
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000)
+    this.reconnectAttempts++
+
+    console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`)
+    this.reconnectTimeout = setTimeout(() => {
+      this.connect()
+    }, delay)
+  }
+
   disconnect() {
+    this.shouldReconnect = false
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout)
+      this.reconnectTimeout = null
+    }
     if (this.ws) {
       this.ws.close()
       this.ws = null

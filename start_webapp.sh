@@ -28,10 +28,12 @@ fi
 # Activate virtual environment
 source venv/bin/activate
 
-# Install dependencies
-if [ -f "requirements.txt" ]; then
-    echo "📦 Installing backend dependencies..."
-    pip install -q -r requirements.txt
+# Install dependencies from ROOT requirements.txt (contains all packages)
+if [ -f "../requirements.txt" ]; then
+    echo "📦 Installing dependencies from root requirements.txt..."
+    pip install -q -r ../requirements.txt
+else
+    echo "⚠️  No requirements.txt found in project root!"
 fi
 
 # Check for .env file
@@ -50,9 +52,9 @@ if ! grep -q "GEMINI_API_KEY" .env; then
     echo "⚠️  GEMINI_API_KEY not found in backend/.env. AI features might not work."
 fi
 
-# Start Backend Server
+# Start Backend Server (use venv's Python directly for background process)
 echo "🚀 Starting FastAPI backend server..."
-python3 main.py &
+./venv/bin/python main.py &
 BACKEND_PID=$!
 cd ..
 

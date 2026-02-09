@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Square, Save, Send } from 'lucide-react'
+import { ArrowLeft, Square, Save, Send, Sparkles } from 'lucide-react'
 import { useStore } from '@/store/useStore'
 import { socketService } from '@/services/socket'
 import { api } from '@/services/api'
 import gsap from 'gsap'
 import MicIcon from '@/components/MicIcon'
+import TypewriterText from '@/components/TypewriterText'
 
 export default function RecordingSession() {
   const navigate = useNavigate()
@@ -23,7 +24,6 @@ export default function RecordingSession() {
 
   // Clear session ONLY when component unmounts (leaving the page)
   useEffect(() => {
-    // Cleanup function runs when component unmounts (user leaves page)
     return () => {
       clearSession()
       receivedTextsRef.current.clear()
@@ -35,10 +35,9 @@ export default function RecordingSession() {
 
   useEffect(() => {
     socketService.connect()
-    
+
     socketService.on('transcript', (data: any) => {
       const text = data.text.trim()
-      // Check if we've already received this text
       if (!receivedTextsRef.current.has(text)) {
         receivedTextsRef.current.add(text)
         appendTranscript(text + ' ')
@@ -52,7 +51,6 @@ export default function RecordingSession() {
       setStatus(data.status as any)
     })
 
-    // Poll for transcriptions every second when recording
     const pollInterval = setInterval(async () => {
       if (isRecording) {
         try {
@@ -60,7 +58,6 @@ export default function RecordingSession() {
           if (response.texts && response.texts.length > 0) {
             response.texts.forEach((text: string) => {
               const trimmedText = text.trim()
-              // Only add if not already received
               if (!receivedTextsRef.current.has(trimmedText)) {
                 receivedTextsRef.current.add(trimmedText)
                 appendTranscript(trimmedText + ' ')
@@ -97,10 +94,7 @@ export default function RecordingSession() {
 
   const handleStart = async () => {
     try {
-      // DON'T clear session - keep existing transcript and chat
-      // Only clear deduplication tracking for new recording
       receivedTextsRef.current.clear()
-      
       await api.startSession()
       setRecording(true)
       setStatus('recording')
@@ -122,7 +116,7 @@ export default function RecordingSession() {
 
   const handleSaveClick = () => {
     setShowSaveModal(true)
-    setSessionName('') // Reset name
+    setSessionName('')
   }
 
   const handleSaveConfirm = async () => {
@@ -134,11 +128,10 @@ export default function RecordingSession() {
     try {
       setIsSaving(true)
       setProcessing(true)
-      
+
       console.log('Saving session with name:', sessionName.trim())
       await api.saveSession(transcript, messages, sessionName.trim())
-      
-      // Clear session after saving and navigate away
+
       clearSession()
       receivedTextsRef.current.clear()
       setShowSaveModal(false)
@@ -159,40 +152,46 @@ export default function RecordingSession() {
     addMessage(userMessage)
     setQuestion('')
 
-    // Add thinking message
     const thinkingMessage = { role: 'ai' as const, content: '🤔 Thinking...', timestamp: new Date() }
     addMessage(thinkingMessage)
 
     try {
       const response = await api.askQuestion(question, thinkMode)
-      
-      // Remove thinking message and add real answer
+
       const messages = useStore.getState().messages
       const filteredMessages = messages.filter(m => m.content !== '🤔 Thinking...')
       useStore.setState({ messages: filteredMessages })
-      
+
       const aiMessage = { role: 'ai' as const, content: response.answer, timestamp: new Date() }
       addMessage(aiMessage)
-      
+
       if (chatRef.current) {
         chatRef.current.scrollTop = chatRef.current.scrollHeight
       }
     } catch (error) {
       console.error('Failed to ask question:', error)
-      
-      // Remove thinking message and show error
+
       const messages = useStore.getState().messages
       const filteredMessages = messages.filter(m => m.content !== '🤔 Thinking...')
       useStore.setState({ messages: filteredMessages })
-      
+
       const errorMessage = { role: 'ai' as const, content: '❌ Error: Could not get answer. Please try again.', timestamp: new Date() }
       addMessage(errorMessage)
     }
   }
 
   return (
-    <div className="min-h-screen p-6" style={{ background: '#000000' }}>
-      <div className="max-w-7xl mx-auto">
+    <div className="relative min-h-screen w-full bg-true-black overflow-hidden pt-6 px-6">
+      {/* Background Orbs (Matches Hero) */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 left-1/4 w-[800px] h-[800px] bg-royal-purple/20 rounded-full blur-[120px] animate-float" />
+        <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] bg-deep-magenta/15 rounded-full blur-[100px] animate-float [animation-delay:2s]" />
+        <div className="absolute bottom-1/4 left-1/2 w-[500px] h-[500px] bg-orchid/10 rounded-full blur-[80px] animate-float [animation-delay:4s]" />
+        {/* Grain Overlay */}
+        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03]" />
+      </div>
+
+      <div className="relative z-10 max-w-[95%] mx-auto h-full flex flex-col min-h-[calc(100vh-3rem)]">
         {/* Header */}
         <motion.div
           initial={{ y: -20, opacity: 0 }}
@@ -201,153 +200,150 @@ export default function RecordingSession() {
         >
           <button
             onClick={() => navigate('/')}
-            className="flex items-center gap-2 glass-effect px-4 py-2 rounded-lg hover:bg-dark-600 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-colors text-light-gray hover:text-white backdrop-blur-sm"
           >
             <ArrowLeft className="w-5 h-5" />
-            <span>Dashboard</span>
+            <span>Back</span>
           </button>
 
-          <div className="flex items-center gap-4">
-            <div 
-              className="flex items-center gap-3 px-6 py-3 rounded-xl"
-              style={{
-                background: status === 'recording' ? 'rgba(255,0,0,0.2)' : 
-                           status === 'processing' ? 'rgba(255,165,0,0.2)' : 
-                           'rgba(128,128,128,0.2)',
-                border: status === 'recording' ? '2px solid rgba(255,0,0,0.5)' : 
-                       status === 'processing' ? '2px solid rgba(255,165,0,0.5)' : 
-                       '2px solid rgba(128,128,128,0.3)',
-                boxShadow: status === 'recording' ? '0 0 20px rgba(255,0,0,0.4)' : 
-                          status === 'processing' ? '0 0 20px rgba(255,165,0,0.4)' : 
-                          'none'
-              }}
-            >
-              <div className={`w-4 h-4 rounded-full ${
-                status === 'recording' ? 'bg-red-500 animate-pulse' :
-                status === 'processing' ? 'bg-orange-500 animate-pulse' :
+          {/* Status Indicator */}
+          <div
+            className="flex items-center gap-3 px-6 py-2.5 rounded-full border backdrop-blur-md transition-all duration-300"
+            style={{
+              background: status === 'recording' ? 'rgba(239, 68, 68, 0.1)' :
+                status === 'processing' ? 'rgba(249, 115, 22, 0.1)' :
+                  'rgba(255, 255, 255, 0.05)',
+              borderColor: status === 'recording' ? 'rgba(239, 68, 68, 0.3)' :
+                status === 'processing' ? 'rgba(249, 115, 22, 0.3)' :
+                  'rgba(255, 255, 255, 0.1)',
+              boxShadow: status === 'recording' ? '0 0 20px rgba(239, 68, 68, 0.2)' : 'none'
+            }}
+          >
+            <div className={`w-2.5 h-2.5 rounded-full ${status === 'recording' ? 'bg-red-500 animate-pulse' :
+              status === 'processing' ? 'bg-orange-500 animate-pulse' :
                 'bg-gray-500'
-              }`} 
-              style={{
-                boxShadow: status === 'recording' ? '0 0 10px rgba(255,0,0,0.8)' : 
-                          status === 'processing' ? '0 0 10px rgba(255,165,0,0.8)' : 
-                          'none'
-              }}
-              />
-              <span className="text-base font-bold uppercase text-white">
-                {status}
-              </span>
-            </div>
+              }`} />
+            <span className="text-sm font-semibold tracking-wide uppercase text-white/90">
+              {status}
+            </span>
           </div>
         </motion.div>
 
-        {/* Main Content */}
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* Transcript Panel */}
+        {/* Main Content Grid */}
+        <div className="grid lg:grid-cols-3 gap-6 flex-1 pb-6">
+
+          {/* Left Column: Transcription */}
           <motion.div
             initial={{ x: -20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ delay: 0.1 }}
-            className="lg:col-span-2 glass-effect rounded-2xl p-6 flex flex-col"
+            className="lg:col-span-2 flex flex-col gap-6 h-full"
           >
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <div style={{ transform: 'scale(0.4)', transformOrigin: 'left center' }}>
-                <MicIcon size={50} color="#00bfff" showWaves={false} />
-              </div>
-              Live Transcription
-            </h2>
+            {/* Transcript Panel */}
+            <div className="flex-1 bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 flex flex-col relative overflow-hidden group min-h-[600px]">
+              <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
-            <div
-              ref={transcriptRef}
-              className="flex-1 bg-dark-800 rounded-xl p-6 mb-4 overflow-y-auto min-h-[400px] max-h-[500px] font-mono text-sm leading-relaxed"
-            >
-              {transcript || (
-                <p className="text-gray-500 italic">
-                  Transcript will appear here as you speak...
-                </p>
-              )}
+              <h2 className="text-2xl font-bold mb-6 flex items-center gap-3 text-white">
+                <div className="p-2 bg-royal-purple/20 rounded-lg border border-royal-purple/30">
+                  <MicIcon size={28} color="#a855f7" showWaves={isRecording} />
+                </div>
+                Live Transcription
+              </h2>
+
+              <div
+                ref={transcriptRef}
+                className="flex-1 bg-black/20 rounded-2xl p-8 overflow-y-auto font-mono text-base leading-relaxed text-gray-200 shadow-inner custom-scrollbar"
+              >
+                {transcript ? (
+                  <TypewriterText
+                    text={transcript}
+                    speed={30}
+                    onUpdate={() => {
+                      if (transcriptRef.current) {
+                        transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-gray-500 gap-6">
+                    <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center animate-pulse">
+                      <MicIcon size={40} color="#4b5563" showWaves={false} />
+                    </div>
+                    <p className="text-xl">Waiting for speech...</p>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Controls */}
-            <div className="flex gap-4">
+            <div className="flex gap-4 h-24">
               {!isRecording ? (
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                <button
                   onClick={handleStart}
-                  className="flex-1 px-8 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all"
-                  style={{
-                    background: 'linear-gradient(135deg, #0066ff 0%, #00bfff 100%)',
-                    boxShadow: '0 0 30px rgba(0,102,255,0.6), 0 4px 20px rgba(0,102,255,0.4)',
-                    border: '2px solid rgba(0,191,255,0.5)'
-                  }}
+                  className="flex-1 group relative rounded-3xl bg-royal-purple/20 border border-royal-purple/30 hover:bg-royal-purple/30 transition-all duration-300 overflow-hidden"
                 >
-                  <div style={{ transform: 'scale(0.35)' }}>
-                    <MicIcon size={60} color="#ffffff" showWaves={true} />
+                  <div className="absolute inset-0 bg-gradient-to-r from-royal-purple/50 to-deep-magenta/50 opacity-0 group-hover:opacity-20 transition-opacity" />
+                  <div className="flex items-center justify-center gap-4 relative z-10">
+                    <div className="p-3 bg-white/10 rounded-full">
+                      <MicIcon size={32} color="#ffffff" showWaves={false} />
+                    </div>
+                    <span className="text-2xl font-bold text-white">Start Recording</span>
                   </div>
-                  Start Recording
-                </motion.button>
+                </button>
               ) : (
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
+                <button
                   onClick={handleStop}
-                  className="flex-1 px-8 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all relative overflow-hidden"
-                  style={{
-                    background: 'linear-gradient(135deg, #ff0000 0%, #ff6600 100%)',
-                    boxShadow: '0 0 40px rgba(255,0,0,0.8), 0 4px 20px rgba(255,0,0,0.6)',
-                    border: '2px solid rgba(255,102,0,0.5)'
-                  }}
+                  className="flex-1 group relative rounded-3xl bg-rose/20 border border-rose/30 hover:bg-rose/30 transition-all duration-300 overflow-hidden"
                 >
-                  <div ref={pulseRef} className="absolute inset-0 bg-red-600 rounded-xl" />
-                  <Square className="w-6 h-6 relative z-10 fill-current" />
-                  <span className="relative z-10">Stop Recording</span>
-                </motion.button>
+                  <div ref={pulseRef} className="absolute inset-0 bg-rose/10 pointer-events-none" />
+                  <div className="flex items-center justify-center gap-4 relative z-10">
+                    <div className="p-3 bg-white/10 rounded-full animate-pulse">
+                      <Square className="w-6 h-6 text-white fill-current" />
+                    </div>
+                    <span className="text-2xl font-bold text-white">Stop Recording</span>
+                  </div>
+                </button>
               )}
 
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+              <button
                 onClick={handleSaveClick}
                 disabled={!transcript}
-                className="px-8 py-4 rounded-xl font-bold text-lg flex items-center gap-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{
-                  background: transcript ? 'linear-gradient(135deg, #00ff00 0%, #32cd32 100%)' : '#2a2a2a',
-                  boxShadow: transcript ? '0 0 30px rgba(0,255,0,0.6), 0 4px 20px rgba(0,255,0,0.4)' : 'none',
-                  border: transcript ? '2px solid rgba(50,205,50,0.5)' : '2px solid #3a3a3a'
-                }}
+                className="w-1/4 rounded-3xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
               >
-                <Save className="w-6 h-6" />
-                Save
-              </motion.button>
+                <Save className="w-8 h-8 text-emerald-400" />
+                <span className="text-xl font-bold text-white">Save</span>
+              </button>
             </div>
           </motion.div>
 
-          {/* Chat Panel */}
+          {/* Right Column: AI Assistant */}
           <motion.div
             initial={{ x: 20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ delay: 0.2 }}
-            className="glass-effect rounded-2xl p-6 flex flex-col"
+            className="flex flex-col bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-8 h-full relative overflow-hidden min-h-[700px]"
           >
-            <h2 className="text-xl font-semibold mb-4">AI Assistant</h2>
+            <div className="absolute top-0 right-0 p-4 opacity-20 pointer-events-none">
+              <Sparkles className="w-40 h-40 text-royal-purple" />
+            </div>
+
+            <h2 className="text-2xl font-bold mb-6 flex items-center gap-3 text-white relative z-10">
+              <div className="p-2 bg-deep-magenta/20 rounded-lg border border-deep-magenta/30">
+                <Sparkles className="w-6 h-6 text-deep-magenta" />
+              </div>
+              AI Assistant
+            </h2>
 
             <div
               ref={chatRef}
-              className="flex-1 bg-dark-800 rounded-xl p-4 mb-4 overflow-y-auto min-h-[400px] max-h-[500px] space-y-4"
+              className="flex-1 bg-black/20 rounded-2xl p-6 mb-6 overflow-y-auto space-y-6 relative z-10"
             >
               <AnimatePresence>
                 {messages.length === 0 ? (
-                  <div className="text-sm space-y-2">
-                    <p className="text-gray-400 font-semibold">
-                      🤖 AI Assistant Ready
-                    </p>
-                    <p className="text-gray-500 italic">
-                      I can answer questions about the lecture based on the transcript.
-                      Start recording and ask me anything!
-                    </p>
-                    <p className="text-gray-600 text-xs">
-                      Powered by Ollama AI
-                    </p>
+                  <div className="flex flex-col items-center justify-center h-full text-center text-gray-500 p-4">
+                    <Sparkles className="w-12 h-12 mb-3 text-gray-600 opacity-50" />
+                    <p className="text-sm font-medium">AI Ready</p>
+                    <p className="text-xs mt-1 max-w-[200px]">Ask questions about your lecture transcript in real-time.</p>
                   </div>
                 ) : (
                   messages.map((msg, idx) => (
@@ -355,127 +351,122 @@ export default function RecordingSession() {
                       key={idx}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className={`p-3 rounded-lg ${
-                        msg.role === 'user'
-                          ? 'bg-accent-blue/20 ml-8'
-                          : 'bg-dark-700 mr-8'
-                      }`}
+                      className={`p-3 rounded-2xl max-w-[90%] ${msg.role === 'user'
+                        ? 'bg-royal-purple/20 border border-royal-purple/20 ml-auto rounded-tr-sm'
+                        : 'bg-white/5 border border-white/10 mr-auto rounded-tl-sm'
+                        }`}
                     >
-                      <p className="text-xs text-gray-400 mb-1">
-                        {msg.role === 'user' ? 'You' : 'AI'}
+                      <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">
+                        {msg.role === 'user' ? 'You' : 'AI Assistant'}
                       </p>
-                      <p className="text-sm">{msg.content}</p>
+                      <p className="text-sm text-gray-200 leading-relaxed">{msg.content}</p>
                     </motion.div>
                   ))
                 )}
               </AnimatePresence>
             </div>
 
-            {/* Think Mode Toggle */}
-            <div className="mb-3 flex items-center justify-between px-1">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={thinkMode}
-                  onChange={(e) => setThinkMode(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-600 bg-dark-800 text-accent-blue focus:ring-accent-blue focus:ring-offset-0"
-                />
-                <span className="text-sm text-gray-400">
-                  {thinkMode ? '🧠 Think Mode (Use AI Knowledge)' : '📄 Transcript Only'}
-                </span>
-              </label>
-            </div>
+            {/* Controls */}
+            <div className="relative z-10 mt-auto">
+              <div className="flex items-center justify-between mb-3 px-1">
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <div className={`w-8 h-4 rounded-full p-0.5 transition-colors ${thinkMode ? 'bg-deep-magenta' : 'bg-gray-700'}`}>
+                    <div className={`w-3 h-3 bg-white rounded-full shadow transition-transform ${thinkMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={thinkMode}
+                    onChange={(e) => setThinkMode(e.target.checked)}
+                    className="hidden"
+                  />
+                  <span className="text-xs font-medium text-gray-400 group-hover:text-gray-300 transition-colors">
+                    Think Mode {thinkMode && '(Enabled)'}
+                  </span>
+                </label>
+              </div>
 
-            {/* Question Input */}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
-                placeholder={thinkMode ? "Ask anything..." : "Ask about the transcript..."}
-                className="flex-1 bg-dark-800 border border-dark-500 rounded-lg px-4 py-2 focus:outline-none focus:border-accent-blue transition-colors"
-              />
-              <motion.button
-                whileHover={{ scale: 1.1 }}
-                whileTap={{ scale: 0.9 }}
-                onClick={handleAskQuestion}
-                className="p-3 rounded-xl transition-all"
-                style={{
-                  background: thinkMode 
-                    ? 'linear-gradient(135deg, #9333ea 0%, #c084fc 100%)'
-                    : 'linear-gradient(135deg, #0066ff 0%, #00bfff 100%)',
-                  boxShadow: thinkMode
-                    ? '0 0 20px rgba(147,51,234,0.5)'
-                    : '0 0 20px rgba(0,102,255,0.5)',
-                  border: thinkMode
-                    ? '2px solid rgba(192,132,252,0.3)'
-                    : '2px solid rgba(0,191,255,0.3)'
-                }}
-              >
-                <Send className="w-6 h-6" />
-              </motion.button>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
+                  placeholder="Ask a question..."
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 pr-12 text-white placeholder-gray-500 focus:outline-none focus:border-royal-purple/50 focus:bg-black/60 transition-all"
+                />
+                <button
+                  onClick={handleAskQuestion}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
             </div>
           </motion.div>
         </div>
-      </div>
+      </div >
 
       {/* Save Session Modal */}
-      {showSaveModal && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
-          onClick={() => !isSaving && setShowSaveModal(false)}
-        >
+      {
+        showSaveModal && (
           <motion.div
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            className="bg-dark-900 rounded-2xl p-8 max-w-md w-full border-2 border-green-500/30 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4"
+            onClick={() => !isSaving && setShowSaveModal(false)}
           >
-            <div className="text-center mb-6">
-              <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Save className="w-8 h-8 text-green-500" />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              className="bg-[#0D0D12] rounded-3xl p-8 max-w-md w-full border border-white/10 shadow-2xl relative overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Background Gradients */}
+              <div className="absolute top-0 right-0 w-32 h-32 bg-royal-purple/20 blur-[50px]" />
+              <div className="absolute bottom-0 left-0 w-32 h-32 bg-deep-magenta/20 blur-[50px]" />
+
+              <div className="text-center mb-8 relative z-10">
+                <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/20">
+                  <Save className="w-8 h-8 text-emerald-400" />
+                </div>
+                <h2 className="text-2xl font-bold mb-2 text-white">Save Session</h2>
+                <p className="text-gray-400">Enter a name for this recording</p>
               </div>
-              <h2 className="text-2xl font-bold mb-2">Save Session</h2>
-              <p className="text-gray-400">Give your session a name</p>
-            </div>
 
-            <input
-              type="text"
-              value={sessionName}
-              onChange={(e) => setSessionName(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSaveConfirm()}
-              placeholder="e.g., OSI Model Lecture"
-              className="w-full bg-dark-800 border border-dark-500 rounded-lg px-4 py-3 mb-6 focus:outline-none focus:border-green-500 transition-colors text-lg"
-              autoFocus
-            />
+              <input
+                type="text"
+                value={sessionName}
+                onChange={(e) => setSessionName(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSaveConfirm()}
+                placeholder="e.g., Computer Networks Lecture 1"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-4 mb-6 focus:outline-none focus:border-royal-purple/50 text-white placeholder-gray-600 transition-colors text-lg relative z-10"
+                autoFocus
+              />
 
-            <div className="flex gap-3">
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => setShowSaveModal(false)}
-                disabled={isSaving}
-                className="flex-1 px-6 py-3 bg-dark-700 hover:bg-dark-600 rounded-xl font-semibold transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleSaveConfirm}
-                disabled={isSaving}
-                className="flex-1 px-6 py-3 bg-green-600 hover:bg-green-700 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                <Save className="w-5 h-5" />
-                {isSaving ? 'Saving...' : 'Save'}
-              </motion.button>
-            </div>
+              <div className="flex gap-4 relative z-10">
+                <button
+                  onClick={() => setShowSaveModal(false)}
+                  disabled={isSaving}
+                  className="flex-1 px-6 py-3 bg-white/5 hover:bg-white/10 rounded-xl font-semibold text-gray-300 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveConfirm}
+                  disabled={isSaving}
+                  className="flex-1 px-6 py-3 bg-gradient-to-r from-royal-purple to-deep-magenta hover:brightness-110 rounded-xl font-semibold text-white transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-purple-900/30"
+                >
+                  {isSaving ? (
+                    <>Saving...</>
+                  ) : (
+                    <>Save Session</>
+                  )}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
-    </div>
+        )
+      }
+    </div >
   )
 }

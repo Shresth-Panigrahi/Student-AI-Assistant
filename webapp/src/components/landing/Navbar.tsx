@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Menu, X } from 'lucide-react';
 
-import { motion } from 'framer-motion';
+import { motion } from 'framer-motion'
+import { useNavigate } from 'react-router-dom';
 
 const Navbar = () => {
+    const navigate = useNavigate();
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -55,7 +57,7 @@ const Navbar = () => {
                 {/* CTA Button */}
                 <div className="hidden md:block">
                     <motion.button
-                        onClick={() => window.location.href = '/session'}
+                        onClick={() => navigate('/session')}
                         initial="initial"
                         whileHover="hover"
                         variants={{

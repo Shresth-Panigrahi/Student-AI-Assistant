@@ -1,42 +1,29 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { AnimatePresence } from 'framer-motion'
-// import NavigationLoader from './components/NavigationLoader'
 import Auth from './pages/Auth'
-import Dashboard from './pages/Dashboard'
 import RecordingSession from './pages/RecordingSession'
 import History from './pages/History'
 import TranscriptDetail from './pages/TranscriptDetail'
 import LandingPage from './pages/LandingPage'
-// import { useState } from 'react'
 
 function AppContent() {
-  const isAuth = !!localStorage.getItem('user') // Matching Auth.tsx logic
-
-  // Note: Previous "InitialSplash" is removed in favor of LandingPage
+  const isAuth = !!localStorage.getItem('user')
 
   return (
-    <>
-      <AnimatePresence mode="wait">
-        {/* {showLoader && <NavigationLoader key="nav-loader" />} */}
-      </AnimatePresence>
+    <div className="min-h-screen bg-true-black">
+      <Routes>
+        {/* Public Routes */}
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/auth" element={isAuth ? <Navigate to="/session" replace /> : <Auth />} />
 
-      <div className="min-h-screen bg-true-black">
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/auth" element={isAuth ? <Navigate to="/dashboard" replace /> : <Auth />} />
+        {/* Protected Routes */}
+        <Route path="/session" element={isAuth ? <RecordingSession /> : <Navigate to="/auth" replace />} />
+        <Route path="/history" element={isAuth ? <History /> : <Navigate to="/auth" replace />} />
+        <Route path="/transcript/:id" element={isAuth ? <TranscriptDetail /> : <Navigate to="/auth" replace />} />
 
-          {/* Protected Routes */}
-          <Route path="/dashboard" element={isAuth ? <Dashboard /> : <Navigate to="/auth" replace />} />
-          <Route path="/session" element={isAuth ? <RecordingSession /> : <Navigate to="/auth" replace />} />
-          <Route path="/history" element={isAuth ? <History /> : <Navigate to="/auth" replace />} />
-          <Route path="/transcript/:id" element={isAuth ? <TranscriptDetail /> : <Navigate to="/auth" replace />} />
-
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </div>
-    </>
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </div>
   )
 }
 

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/landing/Navbar';
 import Hero from '../components/landing/Hero';
 import ProblemSolution from '../components/landing/ProblemSolution';
@@ -10,6 +11,7 @@ import Footer from '../components/landing/Footer';
 import Lenis from '@studio-freight/lenis'
 
 const LandingPage = () => {
+    const navigate = useNavigate();
     useEffect(() => {
         const lenis = new Lenis()
 
@@ -50,7 +52,7 @@ const LandingPage = () => {
                     Ready to transform <br /> your learning?
                 </h2>
                 <button
-                    onClick={() => window.location.href = '/auth'}
+                    onClick={() => navigate('/session')}
                     className="relative z-10 px-10 py-5 bg-gradient-to-r from-royal-purple to-deep-magenta rounded-full text-xl font-bold shadow-[0_0_50px_rgba(109,40,217,0.5)] hover:scale-105 hover:shadow-[0_0_80px_rgba(109,40,217,0.7)] transition-all duration-300"
                 >
                     Start Recording Free

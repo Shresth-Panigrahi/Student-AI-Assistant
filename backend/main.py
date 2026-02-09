@@ -97,6 +97,11 @@ manager = ConnectionManager()
 # Database is initialized automatically when database module is imported
 print("✅ Using SQLite3 database")
 
+# Initialize transcriber at startup to show status
+transcriber = get_transcriber()
+if transcriber.available:
+    print("✅ OnDemand transcription ready")
+
 # Routes
 @app.get("/")
 async def root():
@@ -119,7 +124,7 @@ async def health_check():
 
 @app.post("/api/session/start")
 async def start_session():
-    """Start a new recording session with real Whisper transcription"""
+    """Start a new recording session with OnDemand transcription"""
     global transcription_queue
     
     # Set recording state but DON'T clear transcript/messages
@@ -132,7 +137,7 @@ async def start_session():
     #     chatbot = get_chatbot()
     #     chatbot.reset()
     
-    # Check if Whisper is available
+    # Check if OnDemand transcription is available
     if not is_whisper_available():
         await manager.broadcast({
             "type": "status",
@@ -140,7 +145,7 @@ async def start_session():
         })
         return {
             "success": False, 
-            "message": "Whisper not available. Install with: pip install faster-whisper"
+            "message": "OnDemand transcription not configured. Please add ONDEMAND_API_KEY to .env file."
         }
     
     # Start real audio transcription

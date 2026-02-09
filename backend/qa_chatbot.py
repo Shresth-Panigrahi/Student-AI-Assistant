@@ -1,6 +1,7 @@
 """
 Real-time Q&A Chatbot using Google Gemini API
 Analyzes transcript and answers questions based on context
+Think Mode: Uses Tavily web search for additional context
 """
 import os
 import google.generativeai as genai
@@ -10,12 +11,22 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Try to import Tavily
+try:
+    from tavily import TavilyClient
+    TAVILY_AVAILABLE = True
+except ImportError:
+    TAVILY_AVAILABLE = False
+    print("⚠️  Tavily not installed. Think Mode will use Gemini's knowledge only.")
+
+
 class QAChatbot:
     """Q&A Chatbot that answers questions based on transcript context using Gemini"""
     
     def __init__(self, model_name: str = "gemini-2.0-flash-exp"):
         self.model_name = model_name
         self.conversation_history: List[Dict[str, str]] = []
+        self.tavily_client = None
         
         # Configure Gemini
         api_key = os.getenv("GEMINI_API_KEY")
@@ -31,6 +42,48 @@ class QAChatbot:
             except Exception as e:
                 print(f"❌ Failed to configure Gemini: {e}")
                 self.available = False
+        
+        # Configure Tavily for Think Mode
+        tavily_key = os.getenv("TAVILY_API_KEY")
+        if TAVILY_AVAILABLE and tavily_key:
+            try:
+                self.tavily_client = TavilyClient(api_key=tavily_key)
+                print("✅ Tavily web search ready for Think Mode")
+            except Exception as e:
+                print(f"⚠️  Failed to configure Tavily: {e}")
+                self.tavily_client = None
+        elif not tavily_key:
+            print("⚠️  TAVILY_API_KEY not found. Think Mode will use Gemini's knowledge only.")
+    
+    def _search_web(self, query: str, max_results: int = 3) -> str:
+        """Search the web using Tavily and return summarized results"""
+        if not self.tavily_client:
+            return ""
+        
+        try:
+            print(f"🔍 Searching web for: {query[:50]}...")
+            response = self.tavily_client.search(
+                query=query,
+                search_depth="basic",
+                max_results=max_results
+            )
+            
+            # Extract and format search results
+            results = []
+            for result in response.get("results", []):
+                title = result.get("title", "")
+                content = result.get("content", "")[:300]  # Limit content length
+                results.append(f"• {title}: {content}")
+            
+            if results:
+                search_context = "\n".join(results)
+                print(f"✅ Found {len(results)} web results")
+                return search_context
+            
+            return ""
+        except Exception as e:
+            print(f"❌ Web search error: {e}")
+            return ""
     
     def ask(self, question: str, transcript: str, think_mode: bool = False) -> str:
         """
@@ -39,19 +92,24 @@ class QAChatbot:
         Args:
             question: User's question
             transcript: Current transcript text
-            think_mode: If True, use AI's knowledge. If False, only use transcript.
+            think_mode: If True, search web for additional context. If False, only use transcript.
             
         Returns:
             AI-generated answer based on transcript context
         """
         if not self.available:
-            return "Gemini API is not available. Please checking your GEMINI_API_KEY in .env file."
+            return "Gemini API is not available. Please check your GEMINI_API_KEY in .env file."
         
         if not transcript or len(transcript.strip()) < 10:
             return "I don't have enough transcript context yet. Please wait for more transcription or start speaking."
         
+        # If Think Mode is ON, search the web first
+        web_context = ""
+        if think_mode:
+            web_context = self._search_web(question)
+        
         # Create context-aware prompt
-        prompt = self._create_prompt(question, transcript, think_mode)
+        prompt = self._create_prompt(question, transcript, think_mode, web_context)
         
         try:
             # Generate response
@@ -71,13 +129,35 @@ class QAChatbot:
             print(f"❌ Q&A error: {e}")
             return f"Error generating answer: {str(e)}"
     
-    def _create_prompt(self, question: str, transcript: str, think_mode: bool = False) -> str:
+    def _create_prompt(self, question: str, transcript: str, think_mode: bool = False, web_context: str = "") -> str:
         """Create a context-aware prompt for the AI"""
         
         if think_mode:
-            # Think mode: Use AI's knowledge + transcript
-            prompt = f"""You are an AI assistant helping a student understand a lecture.
-            
+            # Think mode: Use web search results + transcript
+            if web_context:
+                prompt = f"""You are an AI assistant helping a student understand a lecture.
+
+LECTURE TRANSCRIPT:
+{transcript}
+
+WEB SEARCH RESULTS (for additional context):
+{web_context}
+
+STUDENT'S QUESTION:
+{question}
+
+INSTRUCTIONS:
+1. First, check if the answer is in the transcript
+2. Use the web search results to provide additional explanation and context
+3. Synthesize information from both sources
+4. Keep your answer concise: 3-4 sentences maximum
+5. Be educational and helpful
+
+ANSWER:"""
+            else:
+                # Fallback if no web results (use Gemini's knowledge)
+                prompt = f"""You are an AI assistant helping a student understand a lecture.
+
 LECTURE TRANSCRIPT:
 {transcript}
 
@@ -86,10 +166,9 @@ STUDENT'S QUESTION:
 
 INSTRUCTIONS:
 1. First, check if the answer is in the transcript
-2. If yes, answer based on the transcript
-3. If no, use your own knowledge to provide a helpful explanation
-4. Relate your answer to the lecture topic when possible
-5. Be clear, educational, and concise (under 200 words)
+2. If the transcript doesn't fully answer, use your knowledge to explain
+3. Keep your answer concise: 3-4 sentences maximum
+4. Be educational and helpful
 
 ANSWER:"""
         else:
@@ -110,11 +189,6 @@ STRICT RULES:
 5. DO NOT make assumptions or inferences
 6. If the answer is not explicitly in the transcript, say: "That information is not in the transcript yet."
 
-Example:
-- Transcript: "Today we are learning about the OSI reference model"
-- Question: "What are we learning today?"
-- Answer: "We are learning about the OSI reference model."
-
 Now answer the question using ONLY the transcript above:"""
         
         return prompt
@@ -128,6 +202,7 @@ Now answer the question using ONLY the transcript above:"""
         """Get conversation history"""
         return self.conversation_history
 
+
 # Global chatbot instance
 _chatbot: Optional[QAChatbot] = None
 
@@ -139,8 +214,6 @@ def get_chatbot() -> QAChatbot:
     return _chatbot
 
 def is_ollama_available() -> bool:
-    """Check if Gemini is available (renamed logic but keeping function name for compatibility if needed, though we should update callers)"""
-    # Note: We should update callers to use is_gemini_available or similar, 
-    # but for now we map this to the chatbot availability to minimize friction
+    """Check if Gemini is available"""
     chatbot = get_chatbot()
     return chatbot.available

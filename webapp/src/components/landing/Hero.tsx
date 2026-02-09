@@ -1,11 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { Mic, Play, ArrowDown, Mouse } from 'lucide-react';
-import gsap from 'gsap';
 
 const Hero = () => {
+    const navigate = useNavigate();
     const containerRef = useRef<HTMLDivElement>(null);
-    const textRef = useRef<HTMLHeadingElement>(null);
     const [typingPhase, setTypingPhase] = useState(0); // 0-3: phases, 4: final
 
     const { scrollY } = useScroll();
@@ -143,7 +143,7 @@ const Hero = () => {
                     className="flex flex-col md:flex-row gap-6"
                 >
                     <button
-                        onClick={() => window.location.href = '/session'}
+                        onClick={() => navigate('/session')}
                         className="group relative w-full md:w-auto flex items-center gap-4 px-8 py-4 rounded-3xl bg-royal-purple/10 border border-royal-purple/20 hover:bg-royal-purple/20 transition-all duration-300"
                     >
                         <div className="p-3 bg-gradient-to-br from-royal-purple to-deep-magenta rounded-xl group-hover:scale-110 transition-transform">
@@ -156,8 +156,8 @@ const Hero = () => {
                     </button>
 
                     <button
-                        onClick={() => document.getElementById('demo')?.scrollIntoView({ behavior: 'smooth' })}
-                        className="group relative w-full md:w-auto flex items-center gap-4 px-8 py-4 rounded-3xl bg-deep-magenta/10 border border-deep-magenta/20 hover:bg-deep-magenta/20 transition-all duration-300"
+                        onClick={() => navigate('/session')}
+                        className="px-8 py-4 bg-white/5 border border-white/10 rounded-full text-lg font-bold backdrop-blur-sm hover:bg-white/10 transition-colors duration-300 flex items-center gap-2"
                     >
                         <div className="p-3 bg-white/10 rounded-xl group-hover:scale-110 transition-transform">
                             <Play className="text-white w-6 h-6 fill-current" />
