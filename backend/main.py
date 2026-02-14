@@ -27,6 +27,11 @@ from audio_transcriber import get_transcriber, is_whisper_available
 # Import Q&A chatbot
 from qa_chatbot import get_chatbot, is_ollama_available
 
+# Import LangChain/LangGraph analysis modules
+from summarizer import summarize_transcript as lc_summarize
+from terminology_extractor import extract_terminologies as lc_extract_terms
+from qa_generator import generate_qa as lc_generate_qa
+
 app = FastAPI(title="AI Student Assistant API")
 
 # CORS middleware
@@ -380,7 +385,7 @@ async def ask_question(request: QuestionRequest):
 
 @app.post("/api/analyze/summarize")
 async def summarize_transcript(request: AnalyzeRequest):
-    """Summarize a transcript using Ollama"""
+    """Summarize a transcript using LangChain + LangGraph"""
     session = db.get_session_by_id(request.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -388,92 +393,33 @@ async def summarize_transcript(request: AnalyzeRequest):
     transcript = session.get("transcript", "")
     
     if not transcript or len(transcript.strip()) < 10:
-        return {
-            "success": False,
-            "message": "Transcript too short to summarize"
-        }
-    
-    # Check if Gemini is available
-    if not is_ollama_available():
-        return {
-            "success": False,
-            "message": "Gemini API not available. Check GEMINI_API_KEY."
-        }
+        return {"success": False, "message": "Transcript too short to summarize"}
     
     try:
-        # Create the prompt
-        prompt = f"""You are an AI assistant integrated into a real-time lecture transcription system. Your job is to summarize spoken transcripts into clean, readable summaries.
-
-The summary should retain all key concepts, definitions, and sequence of explanation from the transcript, while removing filler phrases and repetition.
-
-Output should be clear, concise, and suitable for students reviewing lecture notes.
-
-Here is a lecture transcript. Generate a structured summary that captures the main topics and their key points only from the lecture transcript.
-Do not use external knowledge to generate summary, your task is to look at the transcript and generate the summary only.
-CRITICAL FORMATTING RULES:
-- DO NOT use markdown formatting (no **, ##, -, or *)
-- DO NOT use asterisks or special characters for emphasis
-- Use plain text only
-- Structure with numbered sections and clear paragraphs
-- Use line breaks to separate sections
-- Write in complete sentences
-
-CONTENT REQUIREMENTS:
-- The tone is formal and educational
-- Include clear topic headers (numbered: 1., 2., 3.)
-- Add subpoints under each topic (use letters: a., b., c.)
-- Do not omit definitions or examples mentioned in the transcript
-- Keep summary length proportional to transcript size (around 20-25% of original)
-- If the lecture is very short (under 50 words), provide a three-line summary
-
-EXAMPLE FORMAT:
-1. Main Topic Name
-The main topic discusses... [explanation in plain text]
-
-a. First subtopic
-Description of first subtopic in plain text.
-
-b. Second subtopic
-Description of second subtopic in plain text.
-
-2. Second Main Topic
-The second topic covers... [explanation]
-
-TRANSCRIPT:
-{transcript}
-
-Now generate the summary in plain text format without any markdown or special characters:"""
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lc_summarize, transcript)
         
-        print(f"🔄 Generating summary for transcript ({len(transcript)} chars)...")
-        
-        # Call Gemini
-        model = genai.GenerativeModel("gemini-1.5-flash") # Use Flash for summarization speed
-        response = model.generate_content(prompt)
-        summary = response.text.strip()
-        
-        print(f"✅ Summary generated: {len(summary)} chars")
+        if result["error"]:
+            return {"success": False, "message": result["error"]}
         
         # Save to database
-        db.update_session_summary(request.sessionId, summary)
+        db.update_session_summary(request.sessionId, result["summary"])
         
         return {
             "success": True,
-            "summary": summary,
-            "metadata": {"mode": "summary"}
+            "summary": result["summary"],
+            "metadata": {"mode": "summary", "engine": "langchain"}
         }
-            
     except Exception as e:
         print(f"❌ Summarization error: {e}")
         import traceback
         traceback.print_exc()
-        return {
-            "success": False,
-            "message": f"Failed to generate summary: {str(e)}"
-        }
+        return {"success": False, "message": f"Failed to generate summary: {str(e)}"}
 
 @app.post("/api/analyze/terminologies")
 async def extract_terminologies(request: AnalyzeRequest):
-    """Extract terminologies from a transcript using Ollama"""
+    """Extract terminologies from a transcript using LangChain + LangGraph"""
     session = db.get_session_by_id(request.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -481,124 +427,33 @@ async def extract_terminologies(request: AnalyzeRequest):
     transcript = session.get("transcript", "")
     
     if not transcript or len(transcript.strip()) < 50:
-        return {
-            "success": False,
-            "message": "Transcript too short to extract terminologies"
-        }
-    
-    # Check if Gemini is available
-    if not is_ollama_available():
-        return {
-            "success": False,
-            "message": "Gemini API not available. Check GEMINI_API_KEY."
-        }
+        return {"success": False, "message": "Transcript too short to extract terminologies"}
     
     try:
-        # Create the prompt
-        prompt = f"""Extract key terms from this lecture transcript and return ONLY a JSON array.
-
-RULES:
-1. Extract any necessay (atleast 2-3) important technical terms, concepts, or acronyms
-2. Each term needs a brief definition (1-2 sentences)
-3. Return ONLY the JSON array, no other text
-4. Use this EXACT format:
-
-[
-{{"term": "OSI Model", "definition": "A 7-layer framework for network communication"}},
-{{"term": "Physical Layer", "definition": "The first layer handling physical transmission"}}
-]
-
-TRANSCRIPT:
-{transcript}
-
-JSON ARRAY:"""
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lc_extract_terms, transcript)
         
-        print(f"🔄 Extracting terminologies from transcript ({len(transcript)} chars)...")
+        if result["error"]:
+            return {"success": False, "message": result["error"]}
         
-        # Call Gemini
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-            
-        print(f"📝 Raw response: {text[:200]}...")
+        # Save to database
+        db.add_terminologies(request.sessionId, result["terminologies"])
         
-        # Try to parse JSON
-        try:
-            import json
-            import re
-            
-            # Use regex to find list
-            json_match = re.search(r'\[.*\]', text, re.DOTALL)
-            if json_match:
-                json_str = json_match.group()
-            else:
-                json_str = text
-                
-            # Clean markdown code blocks if present
-            json_str = json_str.replace("```json", "").replace("```", "").strip()
-            
-            terms_list = json.loads(json_str)
-            
-            # Convert to the format expected by database
-            terminologies = {}
-            for idx, item in enumerate(terms_list):
-                term_name = item.get("term", f"term_{idx}")
-                term_key = term_name.lower().replace(" ", "_")
-                
-                terminologies[term_key] = {
-                    "original_term": term_name,
-                    "category": "concept",
-                    "importance": "high",
-                    "subject_area": "Lecture",
-                    "definition": item.get("definition", ""),
-                    "source": "gemini"
-                }
-            
-            print(f"✅ Extracted {len(terminologies)} terminologies")
-            
-            # Save to database
-            db.add_terminologies(request.sessionId, terminologies)
-            
-            return {
-                "success": True,
-                "terminologies": terminologies,
-                "metadata": {"mode": "terminologies"}
-            }
-            
-        except json.JSONDecodeError as e:
-            print(f"❌ JSON parsing error: {e}")
-            print(f"Response was: {text}")
-            
-            # Fallback: create basic terminologies
-            terminologies = {
-                "extracted_content": {
-                    "original_term": "Extracted Content",
-                    "category": "general",
-                    "importance": "medium",
-                    "subject_area": "Lecture",
-                    "definition": "Key terms could not be parsed. Please try again.",
-                    "source": "fallback"
-                }
-            }
-            
-            return {
-                "success": True,
-                "terminologies": terminologies,
-                "metadata": {"mode": "terminologies"}
-            }
-            
+        return {
+            "success": True,
+            "terminologies": result["terminologies"],
+            "metadata": {"mode": "terminologies", "engine": "langchain"}
+        }
     except Exception as e:
         print(f"❌ Terminology extraction error: {e}")
         import traceback
         traceback.print_exc()
-        return {
-            "success": False,
-            "message": f"Failed to extract terminologies: {str(e)}"
-        }
+        return {"success": False, "message": f"Failed to extract terminologies: {str(e)}"}
 
 @app.post("/api/analyze/qa")
 async def generate_qa(request: AnalyzeRequest):
-    """Generate Q&A from transcript using Ollama"""
+    """Generate Q&A from transcript using LangChain + LangGraph"""
     session = db.get_session_by_id(request.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -606,84 +461,27 @@ async def generate_qa(request: AnalyzeRequest):
     transcript = session.get("transcript", "")
     
     if not transcript or len(transcript.strip()) < 50:
-        return {
-            "success": False,
-            "message": "Transcript too short to generate Q&A"
-        }
-    
-    # Check if Gemini is available
-    if not is_ollama_available():
-        return {
-            "success": False,
-            "message": "Gemini API not available. Check GEMINI_API_KEY."
-        }
+        return {"success": False, "message": "Transcript too short to generate Q&A"}
     
     try:
-        import re
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lc_generate_qa, transcript)
         
-        print(f"🔄 Generating Q&A using Gemini ({len(transcript)} chars)...")
+        if result["error"]:
+            return {"success": False, "message": result["error"]}
         
-        # Create simple, direct prompt
-        prompt = f"""Read this lecture transcript and generate 5 quiz questions with answers.
-
-Use this EXACT format:
-Q1: [question]
-A1: [answer]
-
-Q2: [question]
-A2: [answer]
-
-TRANSCRIPT:
-{transcript}
-
-Generate 5 Q&A pairs now:"""
-        
-        # Call Gemini
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        
-        print(f"📝 Gemini response: {text[:300]}...")
-        
-        # Parse Q&A pairs with regex
-        qa_list = []
-        lines = text.split('\n')
-        current_q = None
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            # Match Q1:, Q2:, etc.
-            q_match = re.match(r'^Q\d+[:\.]?\s*(.+)$', line, re.IGNORECASE)
-            if q_match:
-                current_q = q_match.group(1).strip()
-                continue
-            
-            # Match A1:, A2:, etc.
-            a_match = re.match(r'^A\d+[:\.]?\s*(.+)$', line, re.IGNORECASE)
-            if a_match and current_q:
-                current_a = a_match.group(1).strip()
-                qa_list.append({"question": current_q, "answer": current_a})
-                current_q = None
-        
-        print(f"✅ Parsed {len(qa_list)} Q&A pairs")
-        
-        if len(qa_list) > 0:
-            print(f"📋 First Q&A: Q: {qa_list[0]['question'][:50]}... A: {qa_list[0]['answer'][:50]}...")
-        
-        if len(qa_list) < 2:
-            print(f"❌ Not enough Q&A pairs generated")
+        if len(result["qa_pairs"]) < 2:
             return {"success": False, "message": "Could not generate enough questions. Please try again."}
         
-        print(f"✅ Returning {len(qa_list)} Q&A pairs")
-        
         # Save Q&A to database
-        db.add_qa_pairs(request.sessionId, qa_list)
+        db.add_qa_pairs(request.sessionId, result["qa_pairs"])
         
-        return {"success": True, "qa": qa_list}
-            
+        return {
+            "success": True,
+            "qa": result["qa_pairs"],
+            "metadata": {"engine": "langchain"}
+        }
     except Exception as e:
         print(f"❌ Q&A generation error: {e}")
         import traceback

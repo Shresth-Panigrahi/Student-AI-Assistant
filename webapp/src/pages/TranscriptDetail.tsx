@@ -143,8 +143,8 @@ export default function TranscriptDetail() {
                   key={tab}
                   onClick={() => setActiveTab(tab as any)}
                   className={`px-4 py-2 font-medium capitalize transition-colors relative ${activeTab === tab
-                      ? 'text-accent-blue'
-                      : 'text-gray-400 hover:text-gray-300'
+                    ? 'text-accent-blue'
+                    : 'text-gray-400 hover:text-gray-300'
                     }`}
                 >
                   {tab === 'terms' ? 'Terminologies' : tab === 'qa' ? 'Q&A' : tab}
@@ -370,10 +370,10 @@ export default function TranscriptDetail() {
               </motion.button>
 
               <motion.button
-                whileHover={{ scale: session.terminologies ? 1 : 1.02 }}
-                whileTap={{ scale: session.terminologies ? 1 : 0.98 }}
+                whileHover={{ scale: (session.terminologies && Object.keys(session.terminologies).length > 0) ? 1 : 1.02 }}
+                whileTap={{ scale: (session.terminologies && Object.keys(session.terminologies).length > 0) ? 1 : 0.98 }}
                 onClick={handleExtractTerms}
-                disabled={analyzing === 'terms' || !!session.terminologies}
+                disabled={analyzing === 'terms' || (!!session.terminologies && Object.keys(session.terminologies).length > 0)}
                 className="w-full bg-accent-green hover:bg-accent-green/80 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
               >
                 {analyzing === 'terms' ? (
@@ -381,7 +381,7 @@ export default function TranscriptDetail() {
                     <Loader className="w-5 h-5 animate-spin" />
                     Extracting...
                   </>
-                ) : session.terminologies ? (
+                ) : (session.terminologies && Object.keys(session.terminologies).length > 0) ? (
                   <>
                     <BookOpen className="w-5 h-5" />
                     ✓ Terms Extracted
@@ -395,10 +395,10 @@ export default function TranscriptDetail() {
               </motion.button>
 
               <motion.button
-                whileHover={{ scale: session.qa ? 1 : 1.02 }}
-                whileTap={{ scale: session.qa ? 1 : 0.98 }}
+                whileHover={{ scale: (session.qa && session.qa.length > 0) ? 1 : 1.02 }}
+                whileTap={{ scale: (session.qa && session.qa.length > 0) ? 1 : 0.98 }}
                 onClick={handleGenerateQA}
-                disabled={analyzing === 'qa' || !!session.qa}
+                disabled={analyzing === 'qa' || (!!session.qa && session.qa.length > 0)}
                 className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
               >
                 {analyzing === 'qa' ? (
@@ -406,7 +406,7 @@ export default function TranscriptDetail() {
                     <Loader className="w-5 h-5 animate-spin" />
                     Generating...
                   </>
-                ) : session.qa ? (
+                ) : (session.qa && session.qa.length > 0) ? (
                   <>
                     <FileText className="w-5 h-5" />
                     ✓ Q&A Generated
