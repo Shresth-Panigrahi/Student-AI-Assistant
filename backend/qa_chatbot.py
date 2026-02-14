@@ -13,7 +13,7 @@ load_dotenv()
 class QAChatbot:
     """Q&A Chatbot that answers questions based on transcript context using Gemini"""
     
-    def __init__(self, model_name: str = "gemini-2.0-flash-exp"):
+    def __init__(self, model_name: str = "gemini-2.5-flash"):
         self.model_name = model_name
         self.conversation_history: List[Dict[str, str]] = []
         

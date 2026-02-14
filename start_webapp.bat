@@ -28,21 +28,26 @@ if not exist "webapp\node_modules" (
 
 REM Install backend dependencies
 echo Checking Python dependencies...
-pip install -q -r server\requirements.txt
+if not exist "backend\venv" (
+    echo Creating virtual environment...
+    python -m venv backend\venv
+)
+call backend\venv\Scripts\activate
+pip install -q -r backend\requirements.txt
 pip install -q -r requirements.txt
 
 REM Create .env file if it doesn't exist
 if not exist "webapp\.env" (
     echo Creating .env file...
-    copy webapp\.env.example webapp\.env
+    echo VITE_API_URL=http://localhost:8000 > webapp\.env
 )
 
 REM Start backend server
-echo Starting Flask backend server...
-start "Backend Server" cmd /k "cd server && python app.py"
+echo Starting FastAPI backend server...
+start "Backend Server" cmd /k "call backend\venv\Scripts\activate && cd backend && python main.py"
 
 REM Wait for backend to start
-timeout /t 3 /nobreak >nul
+timeout /t 5 /nobreak >nul
 
 REM Start frontend development server
 echo Starting React frontend...
@@ -53,8 +58,8 @@ cd ..
 echo.
 echo Application started successfully!
 echo ================================================
-echo Frontend: http://localhost:3000
-echo Backend:  http://localhost:5000
+echo Frontend: http://localhost:5173
+echo Backend:  http://localhost:8000
 echo.
 echo Close the server windows to stop the application
 pause

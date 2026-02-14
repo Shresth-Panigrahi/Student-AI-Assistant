@@ -18,8 +18,8 @@ try:
 except:
     pass
 
-# Import database module
-import database as db
+# Import database module (MongoDB)
+import database_mongo as db
 
 # Import audio transcriber
 from audio_transcriber import get_transcriber, is_whisper_available
@@ -95,7 +95,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Database is initialized automatically when database module is imported
-print("✅ Using SQLite3 database")
+print("✅ Using MongoDB Atlas (Cloud)")
 
 # Routes
 @app.get("/")
@@ -107,7 +107,7 @@ async def health_check():
     stats = db.get_database_stats()
     return {
         "status": "healthy",
-        "database": "sqlite3",
+        "database": "mongodb",
         "whisper_available": is_whisper_available(),
         "ollama_available": is_ollama_available(),
         "sessions_count": stats["sessions"],
