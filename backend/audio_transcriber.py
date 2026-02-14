@@ -72,9 +72,8 @@ HALLUCINATION_PATTERNS = [
     r"^And,?\s*$",
     r"^The\s*$",
     r"^It's\s*$",
-    # Underscore/blank line hallucinations
-    r"_{3,}",  # Three or more underscores in a row
-    r"\-{5,}",  # Long dashes
+    # NOTE: Underscore/dash patterns are handled by strip_repetitions() instead
+    # so we keep the valid text before them
 ]
 
 # Compile patterns for performance
@@ -84,7 +83,9 @@ COMPILED_HALLUCINATION_PATTERNS = [
 
 
 def is_hallucination(text: str) -> bool:
-    """Check if the transcribed text is a known hallucination pattern"""
+    """Check if the transcribed text is a known hallucination pattern.
+    Only returns True for text that is ENTIRELY garbage (static patterns).
+    For repetition issues, use strip_repetitions() instead."""
     text_stripped = text.strip()
     
     # Too short to be real speech
@@ -96,37 +97,96 @@ def is_hallucination(text: str) -> bool:
         if pattern.search(text_stripped):
             return True
     
-    # Check for excessive repetition within the text
-    words = text_stripped.lower().split()
-    if len(words) >= 4:
-        # If more than 50% of words are the same word, it's likely hallucination
-        word_counts = {}
-        for word in words:
-            word_counts[word] = word_counts.get(word, 0) + 1
-        max_count = max(word_counts.values())
-        if max_count / len(words) > 0.5:
-            return True
-    
-    # Check for repeated phrases (e.g., "I think I think I think")
-    if len(words) >= 6:
-        # Check bigrams and trigrams for repetition
-        for n in [2, 3]:
-            if len(words) >= n * 3:
-                ngrams = [' '.join(words[i:i+n]) for i in range(len(words) - n + 1)]
-                ngram_counts = {}
-                for ng in ngrams:
-                    ngram_counts[ng] = ngram_counts.get(ng, 0) + 1
-                most_common_count = max(ngram_counts.values())
-                # If any phrase repeats more than 3 times, it's hallucination
-                if most_common_count >= 3:
-                    return True
-    
     # Check if text is just punctuation or special characters
     alphanumeric = re.sub(r'[^a-zA-Z0-9]', '', text_stripped)
     if len(alphanumeric) < 2:
         return True
     
+    # Check for excessive single-word repetition (e.g., "the the the the")
+    words = text_stripped.lower().split()
+    if len(words) >= 4:
+        word_counts = {}
+        for word in words:
+            word_counts[word] = word_counts.get(word, 0) + 1
+        max_count = max(word_counts.values())
+        # Only flag if 70%+ is the same word (very aggressive repetition)
+        if max_count / len(words) > 0.7:
+            return True
+    
     return False
+
+
+def strip_repetitions(text: str) -> str:
+    """Remove repeated phrases and underscore/dash noise from text
+    while keeping the valid parts."""
+    text = text.strip()
+    
+    # Strip underscore blanks (e.g., "algorithm is ___________")
+    # Keep text before/after the underscores
+    if re.search(r'_{3,}', text):
+        cleaned = re.sub(r'\s*_{3,}\s*', ' ', text).strip()
+        if cleaned and len(cleaned) > 5:
+            print(f"✂️  Stripped underscores, kept: {cleaned}")
+            text = cleaned
+        else:
+            return ""  # Nothing left after removing underscores
+    
+    # Strip long dashes
+    if re.search(r'-{5,}', text):
+        cleaned = re.sub(r'\s*-{5,}\s*', ' ', text).strip()
+        if cleaned and len(cleaned) > 5:
+            text = cleaned
+        else:
+            return ""
+    
+    words = text.split()
+    if len(words) < 6:
+        return text
+    
+    # Try to find repeated n-grams (bigrams, trigrams) and remove duplicates
+    for n in [3, 2]:  # Check trigrams first (longer = more precise)
+        if len(words) < n * 2:
+            continue
+        
+        ngrams = [' '.join(words[i:i+n]) for i in range(len(words) - n + 1)]
+        ngram_counts = {}
+        for ng in ngrams:
+            ng_lower = ng.lower()
+            ngram_counts[ng_lower] = ngram_counts.get(ng_lower, 0) + 1
+        
+        most_common_count = max(ngram_counts.values())
+        
+        if most_common_count >= 3:
+            # Find the repeated phrase
+            repeated_phrase = max(ngram_counts, key=ngram_counts.get)
+            repeated_words = repeated_phrase.split()
+            
+            # Walk through words and keep only the first occurrence of the repeated block
+            result = []
+            i = 0
+            seen_phrase = False
+            while i < len(words):
+                # Check if current position starts the repeated phrase
+                if i + n <= len(words):
+                    current_ngram = ' '.join(w.lower() for w in words[i:i+n])
+                    if current_ngram == repeated_phrase:
+                        if not seen_phrase:
+                            # Keep the first occurrence
+                            result.extend(words[i:i+n])
+                            seen_phrase = True
+                        # Skip this occurrence (both first and duplicates advance past it)
+                        i += n
+                        continue
+                
+                result.append(words[i])
+                i += 1
+            
+            cleaned = ' '.join(result).strip()
+            if cleaned and len(cleaned) > 3:
+                print(f"✂️  Stripped repetition of '{repeated_phrase}' ({most_common_count}x): kept {len(cleaned)} chars")
+                return cleaned
+    
+    return text
 
 
 def calculate_audio_energy(audio_data: np.ndarray) -> float:
@@ -153,7 +213,7 @@ class AudioTranscriber:
         # Anti-hallucination settings
         self.MIN_AUDIO_ENERGY = 0.0001  # Minimum RMS energy to process (skip silence)
         self.MIN_AUDIO_LENGTH = 1.5    # Minimum seconds of audio to process
-        self.NO_SPEECH_PROB_THRESHOLD = 0.6  # Skip segments with high no_speech probability
+        self.NO_SPEECH_PROB_THRESHOLD = 0.85  # Only skip very high no_speech segments
         
         # Buffer with overlap support
         self.audio_buffer = []
@@ -346,23 +406,29 @@ class AudioTranscriber:
                 
                 # Skip segments with high no_speech probability
                 if segment.no_speech_prob > self.NO_SPEECH_PROB_THRESHOLD:
-                    print(f"🔇 SKIPPED low-speech segment (prob={segment.no_speech_prob:.2f}): {seg_text[:40]}")
+                    print(f"🔇 SKIPPED low-speech segment (prob={segment.no_speech_prob:.2f}): {seg_text}")
                     continue
                 
-                # Skip hallucinated segments
+                # Skip pure hallucinated segments (static patterns only)
                 if is_hallucination(seg_text):
-                    print(f"🚫 FILTERED hallucination: {seg_text[:40]}")
+                    print(f"🚫 FILTERED hallucination: {seg_text}")
                     continue
                 
-                valid_segments.append(seg_text)
+                # Strip repetitions but keep the valid part
+                seg_text = strip_repetitions(seg_text)
+                if seg_text and len(seg_text.strip()) > 2:
+                    valid_segments.append(seg_text)
             
             text = " ".join(valid_segments).strip()
             
             if text and len(text) > 2:
                 # Final hallucination check on combined text
                 if is_hallucination(text):
-                    print(f"🚫 FILTERED combined hallucination: {text[:40]}")
+                    print(f"🚫 FILTERED combined hallucination: {text}")
                     return ""
+                
+                # Strip repetitions from combined text too
+                text = strip_repetitions(text)
                 
                 # Check if we've already sent this exact text
                 text_lower = text.lower().strip()
