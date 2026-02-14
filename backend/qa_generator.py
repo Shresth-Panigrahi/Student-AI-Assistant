@@ -1,6 +1,6 @@
 """
 Q&A Generator using LangChain + LangGraph
-Generates quiz-style questions and answers from lecture transcripts
+Generates Short and Long answer questions based on transcript depth.
 """
 import os
 import json
@@ -14,39 +14,51 @@ from langgraph.graph import StateGraph, END
 
 load_dotenv()
 
-
 # ============================================================
 # State Definition
 # ============================================================
 class QAGeneratorState(TypedDict):
     transcript: str
-    qa_pairs: list          # List of {question, answer} dicts
+    qa_pairs: list          # List of {type, question, answer} dicts
     error: str
 
 
 # ============================================================
-# Prompt
+# Prompt (Modified for Content Depth Analysis)
 # ============================================================
+# We structure the prompt to act as a "Teacher" deciding the exam difficulty
 QA_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """You are a quiz generator for educational content. 
-Your task is to create practice questions from lecture transcripts.
+    ("system", """You are an expert educational content generator. 
+Your task is to create a quiz based on the provided lecture transcript.
+
+ANALYSIS INSTRUCTIONS:
+1. Analyze the transcript for depth and detail.
+2. If the content is detailed/rich: Generate a mix of 'short_answer' and 'long_answer' questions.
+3. If the content is superficial or brief: Stick strictly to 'short_answer' questions.
+
+QUESTION TYPES:
+- "short_answer": Recall-based or simple concept checks. Answer length: 1-2 sentences.
+- "long_answer": Synthesis, explanation of processes, or 'how/why' scenarios. Answer length: 3-5 sentences.
 
 RULES:
-1. Generate exactly 5 questions based ONLY on the transcript content
-2. Questions should test understanding, not just recall
-3. Include a mix of:
-   - Conceptual questions (What is...?, Explain...)
-   - Application questions (How would...?, Why...?)
-   - Comparison questions (What is the difference...?)
-4. Answers should be concise but complete (1-3 sentences)
-5. Return ONLY a valid JSON array, no other text
+1. Generate between 5 to 7 questions total.
+2. Ensure answers are strictly derived from the text provided.
+3. Return ONLY a valid JSON array.
 
 OUTPUT FORMAT (JSON array only):
 [
-  {{"question": "What is the primary purpose of the OSI model?", "answer": "The OSI model provides a 7-layer framework that standardizes network communication functions."}},
-  {{"question": "How does the transport layer ensure reliable delivery?", "answer": "The transport layer uses TCP protocol with acknowledgments and retransmission."}}
+  {{
+    "type": "short_answer",
+    "question": "What is the primary function of the CPU?", 
+    "answer": "The CPU executes instructions and processes data."
+  }},
+  {{
+    "type": "long_answer",
+    "question": "Explain the fetch-decode-execute cycle.", 
+    "answer": "First, the CPU fetches the instruction from memory. Next, the control unit decodes what the instruction means. Finally, the ALU executes the command and stores the result."
+  }}
 ]"""),
-    ("human", "Generate 5 quiz questions from this transcript:\n\n{transcript}\n\nJSON ARRAY:")
+    ("human", "Generate quiz questions based on this transcript:\n\n{transcript}\n\nJSON ARRAY:")
 ])
 
 
@@ -56,9 +68,10 @@ OUTPUT FORMAT (JSON array only):
 def generate_questions_node(state: QAGeneratorState) -> dict:
     """Generate Q&A pairs from transcript"""
     try:
+        # Using a slightly higher temperature to encourage better long-form synthesis
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
-            temperature=0.4,
+            temperature=0.5, 
             google_api_key=os.getenv("GEMINI_API_KEY")
         )
         
@@ -71,8 +84,8 @@ def generate_questions_node(state: QAGeneratorState) -> dict:
         # Parse JSON
         qa_pairs = _parse_qa_json(raw)
         
-        if len(qa_pairs) < 2:
-            return {"qa_pairs": [], "error": "Could not generate enough questions. Please try again."}
+        if len(qa_pairs) < 1:
+            return {"qa_pairs": [], "error": "Could not generate questions. Transcript might be empty."}
         
         print(f"✅ Generated {len(qa_pairs)} Q&A pairs")
         return {"qa_pairs": qa_pairs, "error": ""}
@@ -92,7 +105,7 @@ def _parse_qa_json(text: str) -> list:
         else:
             json_str = text
         
-        # Clean markdown code blocks
+        # Clean markdown code blocks if present
         json_str = json_str.replace("```json", "").replace("```", "").strip()
         
         qa_list = json.loads(json_str)
@@ -100,8 +113,10 @@ def _parse_qa_json(text: str) -> list:
         # Validate structure
         valid_pairs = []
         for item in qa_list:
+            # We now check for 'type' as well, defaulting to 'short_answer' if missing
             if isinstance(item, dict) and "question" in item and "answer" in item:
                 valid_pairs.append({
+                    "type": item.get("type", "short_answer"),
                     "question": item["question"].strip(),
                     "answer": item["answer"].strip()
                 })
@@ -110,33 +125,7 @@ def _parse_qa_json(text: str) -> list:
         
     except (json.JSONDecodeError, Exception) as e:
         print(f"❌ JSON Q&A parsing error: {e}")
-        # Fallback: try regex parsing (Q1: ... A1: ...)
-        return _parse_qa_regex(text)
-
-
-def _parse_qa_regex(text: str) -> list:
-    """Fallback: parse Q&A from Q1:/A1: format"""
-    qa_list = []
-    lines = text.split('\n')
-    current_q = None
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        
-        q_match = re.match(r'^Q\d+[:\.]?\s*(.+)$', line, re.IGNORECASE)
-        if q_match:
-            current_q = q_match.group(1).strip()
-            continue
-        
-        a_match = re.match(r'^A\d+[:\.]?\s*(.+)$', line, re.IGNORECASE)
-        if a_match and current_q:
-            current_a = a_match.group(1).strip()
-            qa_list.append({"question": current_q, "answer": current_a})
-            current_q = None
-    
-    return qa_list
+        return [] # Return empty on failure for safety
 
 
 # ============================================================
