@@ -365,7 +365,10 @@ async def ask_question(request: QuestionRequest):
     
     # Get chatbot and ask question
     chatbot = get_chatbot()
-    answer = chatbot.ask(request.question, transcript, request.think_mode)
+    
+    # Run synchronous Gemini call in a separate thread to avoid blocking the event loop
+    loop = asyncio.get_event_loop()
+    answer = await loop.run_in_executor(None, chatbot.ask, request.question, transcript, request.think_mode)
     
     return {
         "success": True,

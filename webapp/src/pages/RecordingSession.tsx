@@ -35,7 +35,7 @@ export default function RecordingSession() {
 
   useEffect(() => {
     socketService.connect()
-    
+
     socketService.on('transcript', (data: any) => {
       const text = data.text.trim()
       // Check if we've already received this text
@@ -100,7 +100,7 @@ export default function RecordingSession() {
       // DON'T clear session - keep existing transcript and chat
       // Only clear deduplication tracking for new recording
       receivedTextsRef.current.clear()
-      
+
       await api.startSession()
       setRecording(true)
       setStatus('recording')
@@ -134,10 +134,10 @@ export default function RecordingSession() {
     try {
       setIsSaving(true)
       setProcessing(true)
-      
+
       console.log('Saving session with name:', sessionName.trim())
       await api.saveSession(transcript, messages, sessionName.trim())
-      
+
       // Clear session after saving and navigate away
       clearSession()
       receivedTextsRef.current.clear()
@@ -165,26 +165,26 @@ export default function RecordingSession() {
 
     try {
       const response = await api.askQuestion(question, thinkMode)
-      
+
       // Remove thinking message and add real answer
       const messages = useStore.getState().messages
       const filteredMessages = messages.filter(m => m.content !== '🤔 Thinking...')
       useStore.setState({ messages: filteredMessages })
-      
+
       const aiMessage = { role: 'ai' as const, content: response.answer, timestamp: new Date() }
       addMessage(aiMessage)
-      
+
       if (chatRef.current) {
         chatRef.current.scrollTop = chatRef.current.scrollHeight
       }
     } catch (error) {
       console.error('Failed to ask question:', error)
-      
+
       // Remove thinking message and show error
       const messages = useStore.getState().messages
       const filteredMessages = messages.filter(m => m.content !== '🤔 Thinking...')
       useStore.setState({ messages: filteredMessages })
-      
+
       const errorMessage = { role: 'ai' as const, content: '❌ Error: Could not get answer. Please try again.', timestamp: new Date() }
       addMessage(errorMessage)
     }
@@ -208,30 +208,29 @@ export default function RecordingSession() {
           </button>
 
           <div className="flex items-center gap-4">
-            <div 
+            <div
               className="flex items-center gap-3 px-6 py-3 rounded-xl"
               style={{
-                background: status === 'recording' ? 'rgba(255,0,0,0.2)' : 
-                           status === 'processing' ? 'rgba(255,165,0,0.2)' : 
-                           'rgba(128,128,128,0.2)',
-                border: status === 'recording' ? '2px solid rgba(255,0,0,0.5)' : 
-                       status === 'processing' ? '2px solid rgba(255,165,0,0.5)' : 
-                       '2px solid rgba(128,128,128,0.3)',
-                boxShadow: status === 'recording' ? '0 0 20px rgba(255,0,0,0.4)' : 
-                          status === 'processing' ? '0 0 20px rgba(255,165,0,0.4)' : 
-                          'none'
+                background: status === 'recording' ? 'rgba(255,0,0,0.2)' :
+                  status === 'processing' ? 'rgba(255,165,0,0.2)' :
+                    'rgba(128,128,128,0.2)',
+                border: status === 'recording' ? '2px solid rgba(255,0,0,0.5)' :
+                  status === 'processing' ? '2px solid rgba(255,165,0,0.5)' :
+                    '2px solid rgba(128,128,128,0.3)',
+                boxShadow: status === 'recording' ? '0 0 20px rgba(255,0,0,0.4)' :
+                  status === 'processing' ? '0 0 20px rgba(255,165,0,0.4)' :
+                    'none'
               }}
             >
-              <div className={`w-4 h-4 rounded-full ${
-                status === 'recording' ? 'bg-red-500 animate-pulse' :
-                status === 'processing' ? 'bg-orange-500 animate-pulse' :
-                'bg-gray-500'
-              }`} 
-              style={{
-                boxShadow: status === 'recording' ? '0 0 10px rgba(255,0,0,0.8)' : 
-                          status === 'processing' ? '0 0 10px rgba(255,165,0,0.8)' : 
-                          'none'
-              }}
+              <div className={`w-4 h-4 rounded-full ${status === 'recording' ? 'bg-red-500 animate-pulse' :
+                  status === 'processing' ? 'bg-orange-500 animate-pulse' :
+                    'bg-gray-500'
+                }`}
+                style={{
+                  boxShadow: status === 'recording' ? '0 0 10px rgba(255,0,0,0.8)' :
+                    status === 'processing' ? '0 0 10px rgba(255,165,0,0.8)' :
+                      'none'
+                }}
               />
               <span className="text-base font-bold uppercase text-white">
                 {status}
@@ -355,11 +354,10 @@ export default function RecordingSession() {
                       key={idx}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className={`p-3 rounded-lg ${
-                        msg.role === 'user'
+                      className={`p-3 rounded-lg ${msg.role === 'user'
                           ? 'bg-accent-blue/20 ml-8'
                           : 'bg-dark-700 mr-8'
-                      }`}
+                        }`}
                     >
                       <p className="text-xs text-gray-400 mb-1">
                         {msg.role === 'user' ? 'You' : 'AI'}
@@ -394,7 +392,7 @@ export default function RecordingSession() {
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
                 placeholder={thinkMode ? "Ask anything..." : "Ask about the transcript..."}
-                className="flex-1 bg-dark-800 border border-dark-500 rounded-lg px-4 py-2 focus:outline-none focus:border-accent-blue transition-colors"
+                className="flex-1 bg-dark-800 text-white border border-dark-500 rounded-lg px-4 py-2 focus:outline-none focus:border-accent-blue transition-colors placeholder-gray-500"
               />
               <motion.button
                 whileHover={{ scale: 1.1 }}
@@ -402,7 +400,7 @@ export default function RecordingSession() {
                 onClick={handleAskQuestion}
                 className="p-3 rounded-xl transition-all"
                 style={{
-                  background: thinkMode 
+                  background: thinkMode
                     ? 'linear-gradient(135deg, #9333ea 0%, #c084fc 100%)'
                     : 'linear-gradient(135deg, #0066ff 0%, #00bfff 100%)',
                   boxShadow: thinkMode
