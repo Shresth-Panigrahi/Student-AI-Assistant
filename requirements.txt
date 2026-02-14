@@ -24,3 +24,7 @@ tavily-python
 python-dotenv>=1.0.0
 requests>=2.31.0
 cloudinary>=1.36.0
+
+# Database
+motor>=3.3.0
+dnspython>=2.6.0

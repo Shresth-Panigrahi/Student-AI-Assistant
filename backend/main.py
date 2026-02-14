@@ -94,13 +94,16 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# Database is initialized automatically when database module is imported
-print("✅ Using SQLite3 database")
-
-# Initialize transcriber at startup to show status
-transcriber = get_transcriber()
-if transcriber.available:
-    print("✅ OnDemand transcription ready")
+# Startup event to initialize database
+@app.on_event("startup")
+async def startup_db_client():
+    await db.init_database()
+    print("✅ MongoDB initialized")
+    
+    # Initialize transcriber at startup to show status
+    transcriber = get_transcriber()
+    if transcriber.available:
+        print("✅ OnDemand transcription ready")
 
 # Routes
 @app.get("/")
@@ -109,10 +112,10 @@ async def root():
 
 @app.get("/api/health")
 async def health_check():
-    stats = db.get_database_stats()
+    stats = await db.get_database_stats()
     return {
         "status": "healthy",
-        "database": "sqlite3",
+        "database": "mongodb",
         "whisper_available": is_whisper_available(),
         "ollama_available": is_ollama_available(),
         "sessions_count": stats["sessions"],
@@ -131,11 +134,6 @@ async def start_session():
     # This allows multiple recordings in the same session
     current_session["is_recording"] = True
     transcription_queue.clear()  # Clear only the pending queue
-    
-    # DON'T reset chatbot - keep conversation context
-    # if is_ollama_available():
-    #     chatbot = get_chatbot()
-    #     chatbot.reset()
     
     # Check if OnDemand transcription is available
     if not is_whisper_available():
@@ -239,7 +237,7 @@ async def save_session(request: SaveSessionRequest):
     if request.name and request.name.strip():
         session_name = request.name.strip()
     else:
-        stats = db.get_database_stats()
+        stats = await db.get_database_stats()
         session_name = f"Session {stats['sessions'] + 1}"
     
     # Refine the transcript before saving
@@ -307,7 +305,7 @@ CLEANED TRANSCRIPT:"""
             print(f"❌ Refinement error: {e}, using original transcript")
     
     # Save to database with refined transcript
-    success = db.create_session(
+    success = await db.create_session(
         session_id=session_id,
         name=session_name,
         transcript=refined_transcript,
@@ -327,13 +325,13 @@ CLEANED TRANSCRIPT:"""
 @app.get("/api/sessions")
 async def get_sessions():
     """Get all sessions from database"""
-    sessions = db.get_all_sessions()
+    sessions = await db.get_all_sessions()
     return {"sessions": sessions}
 
 @app.get("/api/sessions/{session_id}")
 async def get_session(session_id: str):
     """Get a specific session from database"""
-    session = db.get_session_by_id(session_id)
+    session = await db.get_session_by_id(session_id)
     if session:
         return {"session": session}
     raise HTTPException(status_code=404, detail="Session not found")
@@ -341,7 +339,7 @@ async def get_session(session_id: str):
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str):
     """Delete a session from database"""
-    success = db.delete_session(session_id)
+    success = await db.delete_session(session_id)
     if success:
         return {"success": True, "message": "Session deleted successfully"}
     raise HTTPException(status_code=404, detail="Session not found")
@@ -383,7 +381,7 @@ async def ask_question(request: QuestionRequest):
 @app.post("/api/analyze/summarize")
 async def summarize_transcript(request: AnalyzeRequest):
     """Summarize a transcript using Ollama"""
-    session = db.get_session_by_id(request.sessionId)
+    session = await db.get_session_by_id(request.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -456,7 +454,7 @@ Now generate the summary in plain text format without any markdown or special ch
         print(f"✅ Summary generated: {len(summary)} chars")
         
         # Save to database
-        db.update_session_summary(request.sessionId, summary)
+        await db.update_session_summary(request.sessionId, summary)
         
         return {
             "success": True,
@@ -476,7 +474,7 @@ Now generate the summary in plain text format without any markdown or special ch
 @app.post("/api/analyze/terminologies")
 async def extract_terminologies(request: AnalyzeRequest):
     """Extract terminologies from a transcript using Ollama"""
-    session = db.get_session_by_id(request.sessionId)
+    session = await db.get_session_by_id(request.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -559,7 +557,7 @@ JSON ARRAY:"""
             print(f"✅ Extracted {len(terminologies)} terminologies")
             
             # Save to database
-            db.add_terminologies(request.sessionId, terminologies)
+            await db.add_terminologies(request.sessionId, terminologies)
             
             return {
                 "success": True,
@@ -601,7 +599,7 @@ JSON ARRAY:"""
 @app.post("/api/analyze/qa")
 async def generate_qa(request: AnalyzeRequest):
     """Generate Q&A from transcript using Ollama"""
-    session = db.get_session_by_id(request.sessionId)
+    session = await db.get_session_by_id(request.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -682,7 +680,7 @@ Generate 5 Q&A pairs now:"""
         print(f"✅ Returning {len(qa_list)} Q&A pairs")
         
         # Save Q&A to database
-        db.add_qa_pairs(request.sessionId, qa_list)
+        await db.add_qa_pairs(request.sessionId, qa_list)
         
         return {"success": True, "qa": qa_list}
             
@@ -741,18 +739,18 @@ async def signup(request: SignupRequest):
         return {"success": False, "message": error_msg}
     
     # Check if username exists
-    existing_user = db.get_user_by_username(request.username)
+    existing_user = await db.get_user_by_username(request.username)
     if existing_user:
         return {"success": False, "message": "Username already exists"}
     
     # Check if email exists
-    existing_email = db.get_user_by_email(request.email)
+    existing_email = await db.get_user_by_email(request.email)
     if existing_email:
         return {"success": False, "message": "Email already registered"}
     
     # Hash password and create user
     password_hash = hash_password(request.password)
-    success = db.create_user(request.name, request.username, request.email, password_hash)
+    success = await db.create_user(request.name, request.username, request.email, password_hash)
     
     if success:
         return {
@@ -771,9 +769,9 @@ async def signup(request: SignupRequest):
 async def login(request: LoginRequest):
     """Login user"""
     # Try to find user by username or email
-    user = db.get_user_by_username(request.username_or_email)
+    user = await db.get_user_by_username(request.username_or_email)
     if not user:
-        user = db.get_user_by_email(request.username_or_email)
+        user = await db.get_user_by_email(request.username_or_email)
     
     if not user:
         return {"success": False, "message": "User not found. Please sign up."}
@@ -787,7 +785,7 @@ async def login(request: LoginRequest):
         "success": True,
         "message": "Login successful",
         "user": {
-            "id": user['id'],
+            "id": str(user.get('_id', '')),  # MongoDB uses _id which is ObjectID
             "name": user['name'],
             "username": user['username'],
             "email": user['email']
