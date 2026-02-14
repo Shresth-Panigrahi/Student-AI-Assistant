@@ -47,15 +47,11 @@ if [ ! -f ".env" ]; then
     fi
 fi
 
-# Check for GEMINI_API_KEY
-if ! grep -q "GEMINI_API_KEY" .env; then
-    echo "⚠️  GEMINI_API_KEY not found in backend/.env. AI features might not work."
-fi
-
 # Start Backend Server (use venv's Python directly for background process)
 echo "🚀 Starting FastAPI backend server..."
-./venv/bin/python main.py &
+./venv/bin/python main.py > ../backend.log 2>&1 &
 BACKEND_PID=$!
+echo "✅ Backend started (PID $BACKEND_PID)"
 cd ..
 
 # Wait for backend to initialize
@@ -72,27 +68,27 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
-# Check for .env file
-if [ ! -f ".env" ]; then
-    echo "📝 Creating frontend .env file..."
-    if [ -f ".env.example" ]; then
-        cp .env.example .env
-    else
-        echo "VITE_API_URL=http://localhost:8000" > .env
-    fi
+# Ensure production build exists
+if [ ! -d "dist" ]; then
+    echo "🏗️  Building frontend for production..."
+    npm run build
 fi
 
-# Start Frontend
-echo "🚀 Starting Vite frontend..."
-npm run dev &
+# Start Frontend using Python Server (Robust Workaround)
+echo "🚀 Starting Frontend Server..."
+python3 simple_server.py > ../frontend.log 2>&1 &
 FRONTEND_PID=$!
+echo "✅ Frontend started (PID $FRONTEND_PID)"
+
 cd ..
 
 echo ""
 echo "✅ Application started successfully!"
 echo "================================================"
 echo "Backend:  http://localhost:8000"
-echo "Frontend: http://localhost:5173 (or as shown above)"
+echo "Frontend: http://localhost:3000"
+echo ""
+echo "Logs available in backend.log and frontend.log"
 echo ""
 echo "Press Ctrl+C to stop all servers"
 echo ""

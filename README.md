@@ -31,11 +31,13 @@ npm install
 
 # Backend
 cd backend
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 pip install faster-whisper sounddevice soundfile
 ```
 
-**2. Start Application**
+**2. Start Application (Recommended)**
 
 **Linux/Mac:**
 ```bash
@@ -48,15 +50,17 @@ chmod +x start_webapp.sh
 start_webapp.bat
 ```
 
-**Or manually:**
+**Manual Method (If script fails):**
 ```bash
 # Terminal 1 - Backend
 cd backend
+source venv/bin/activate
 python3 main.py
 
-# Terminal 2 - Frontend
+# Terminal 2 - Frontend (Using robust Python server)
 cd webapp
-npm run dev
+npm run build  # Build the frontend first
+python3 simple_server.py
 ```
 
 **3. Access Application**
@@ -296,4 +300,4 @@ For issues or questions:
 
 **Built with ❤️ for students and educators**
 
-Version: 1.0.0 | Last Updated: November 2025
+Version: 1.1.0 | Last Updated: February 2026

@@ -8,6 +8,7 @@ import { api } from '@/services/api'
 import gsap from 'gsap'
 import MicIcon from '@/components/MicIcon'
 import TypewriterText from '@/components/TypewriterText'
+import StarBackground from '@/components/StarBackground'
 
 export default function RecordingSession() {
   const navigate = useNavigate()
@@ -184,6 +185,7 @@ export default function RecordingSession() {
     <div className="relative min-h-screen w-full bg-true-black overflow-hidden pt-6 px-6">
       {/* Background Orbs (Matches Hero) */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <StarBackground />
         <div className="absolute top-1/4 left-1/4 w-[800px] h-[800px] bg-royal-purple/20 rounded-full blur-[120px] animate-float" />
         <div className="absolute top-1/3 right-1/4 w-[600px] h-[600px] bg-deep-magenta/15 rounded-full blur-[100px] animate-float [animation-delay:2s]" />
         <div className="absolute bottom-1/4 left-1/2 w-[500px] h-[500px] bg-orchid/10 rounded-full blur-[80px] animate-float [animation-delay:4s]" />
