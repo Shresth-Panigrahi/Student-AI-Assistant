@@ -1,6 +1,10 @@
 """
 Real-time audio transcription using Whisper - ANTI-HALLUCINATION VERSION
 """
+
+
+
+""" to chnage changeb 399 """
 import numpy as np
 import sounddevice as sd
 import queue
@@ -68,6 +72,9 @@ HALLUCINATION_PATTERNS = [
     r"^And,?\s*$",
     r"^The\s*$",
     r"^It's\s*$",
+    # Underscore/blank line hallucinations
+    r"_{3,}",  # Three or more underscores in a row
+    r"\-{5,}",  # Long dashes
 ]
 
 # Compile patterns for performance
@@ -140,15 +147,17 @@ class AudioTranscriber:
         # Audio settings
         self.SAMPLE_RATE = 16000
         self.CHANNELS = 1
-        self.CHUNK_DURATION = 5  # Process every 5 seconds
+        self.CHUNK_DURATION = 8  # Process every 8 seconds (longer = more context)
+        self.OVERLAP_DURATION = 1.5  # 1.5s overlap to avoid word boundary cuts
         
         # Anti-hallucination settings
         self.MIN_AUDIO_ENERGY = 0.0001  # Minimum RMS energy to process (skip silence)
-        self.MIN_AUDIO_LENGTH = 2.0    # Minimum seconds of audio to process
+        self.MIN_AUDIO_LENGTH = 1.5    # Minimum seconds of audio to process
         self.NO_SPEECH_PROB_THRESHOLD = 0.6  # Skip segments with high no_speech probability
         
-        # Simple buffer - NO OVERLAP
+        # Buffer with overlap support
         self.audio_buffer = []
+        self.overlap_buffer = None  # Stores tail end of previous chunk for overlap
         self.last_text = ""
         self.all_transcribed_texts = set()  # Track everything we've sent
         
@@ -195,6 +204,7 @@ class AudioTranscriber:
         self.callback = callback
         self.is_recording = True
         self.audio_buffer = []
+        self.overlap_buffer = None
         self.last_text = ""
         self.all_transcribed_texts.clear()
         
@@ -211,14 +221,13 @@ class AudioTranscriber:
         print("🛑 Stopped recording")
     
     def _process_audio(self):
-        """Single thread that records and transcribes - NO OVERLAP"""
+        """Single thread that records and transcribes with overlap"""
         print("🎧 Audio processing started")
         
         def audio_callback(indata, frames, time_info, status):
             if status:
                 print(f"⚠️  Audio status: {status}")
             if self.is_recording:
-                # Just collect audio
                 self.audio_buffer.append(indata.copy())
         
         try:
@@ -237,12 +246,24 @@ class AudioTranscriber:
                     # Process every CHUNK_DURATION seconds
                     if current_time - last_process_time >= self.CHUNK_DURATION:
                         if self.audio_buffer:
-                            # Get buffer and CLEAR IT IMMEDIATELY
+                            # Get buffer and clear
                             buffer_to_process = self.audio_buffer.copy()
-                            self.audio_buffer.clear()  # CLEAR NOW!
+                            self.audio_buffer.clear()
                             
-                            # Process in this thread (no queue, no overlap)
                             audio_data = np.concatenate(buffer_to_process)
+                            
+                            # Prepend overlap from previous chunk to avoid word boundary cuts
+                            if self.overlap_buffer is not None:
+                                audio_data = np.concatenate([self.overlap_buffer, audio_data])
+                            
+                            # Save the tail end as overlap for next chunk
+                            overlap_samples = int(self.SAMPLE_RATE * self.OVERLAP_DURATION)
+                            if len(audio_data) > overlap_samples:
+                                self.overlap_buffer = audio_data[-overlap_samples:]
+                            
+                            # Normalize audio to improve recognition
+                            audio_data = self._normalize_audio(audio_data)
+                            
                             text = self._transcribe_chunk(audio_data)
                             
                             if text and self.callback:
@@ -250,12 +271,21 @@ class AudioTranscriber:
                             
                             last_process_time = current_time
                     
-                    time.sleep(0.1)  # Small sleep to prevent CPU spinning
+                    time.sleep(0.1)
                     
         except Exception as e:
             print(f"❌ Processing error: {e}")
         
         print("📝 Audio processing stopped")
+    
+    @staticmethod
+    def _normalize_audio(audio_data: np.ndarray) -> np.ndarray:
+        """Normalize audio volume to improve recognition of quiet speech"""
+        max_val = np.max(np.abs(audio_data))
+        if max_val > 0 and max_val < 0.5:
+            # Boost quiet audio (but cap at 0.95 to avoid clipping)
+            audio_data = audio_data * min(0.95 / max_val, 3.0)
+        return audio_data
     
     def _transcribe_chunk(self, audio_data: np.ndarray) -> str:
         """Transcribe a single audio chunk with anti-hallucination"""
@@ -288,15 +318,15 @@ class AudioTranscriber:
                 temperature=0.0,
                 vad_filter=True,
                 vad_parameters=dict(
-                    min_silence_duration_ms=500,   # Minimum silence for splitting
-                    speech_pad_ms=300,             # Padding around speech
-                    threshold=0.5,                 # VAD sensitivity (higher = stricter)
+                    min_silence_duration_ms=600,   # Minimum silence for splitting
+                    speech_pad_ms=400,             # Extra padding around speech
+                    threshold=0.35,                # Lower = captures more speech
                 ),
-                condition_on_previous_text=False,
+                condition_on_previous_text=True,   # Keep context between segments
                 no_speech_threshold=self.NO_SPEECH_PROB_THRESHOLD,
-                log_prob_threshold=-1.0,           # Filter low confidence segments
+                log_prob_threshold=-1.0,
                 initial_prompt="This is a lecture transcription. The speaker is discussing academic topics.",
-                hallucination_silence_threshold=2.0,  # Skip segments with 2+ seconds of silence
+                hallucination_silence_threshold=2.0,
             )
             
             # Extract text with per-segment filtering
