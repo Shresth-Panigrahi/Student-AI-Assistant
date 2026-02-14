@@ -159,7 +159,9 @@ class AudioTranscriber:
         self.audio_buffer = []
         self.overlap_buffer = None  # Stores tail end of previous chunk for overlap
         self.last_text = ""
+        self.last_words = []  # Track last chunk's words for overlap dedup
         self.all_transcribed_texts = set()  # Track everything we've sent
+        self.language = "en"  # Auto-detect language (set to "en" to force English)
         
         # Initialize model
         if WHISPER_AVAILABLE:
@@ -206,6 +208,7 @@ class AudioTranscriber:
         self.audio_buffer = []
         self.overlap_buffer = None
         self.last_text = ""
+        self.last_words = []
         self.all_transcribed_texts.clear()
         
         # Start single thread that handles both recording and transcription
@@ -311,23 +314,30 @@ class AudioTranscriber:
                 return ""
             
             # Transcribe with Whisper - optimized settings
-            segments, info = self.model.transcribe(
-                audio_data,
-                language="en",
+            transcribe_kwargs = dict(
                 beam_size=5,
                 temperature=0.0,
                 vad_filter=True,
                 vad_parameters=dict(
-                    min_silence_duration_ms=600,   # Minimum silence for splitting
-                    speech_pad_ms=400,             # Extra padding around speech
-                    threshold=0.35,                # Lower = captures more speech
+                    min_silence_duration_ms=600,
+                    speech_pad_ms=400,
+                    threshold=0.35,
                 ),
-                condition_on_previous_text=True,   # Keep context between segments
+                condition_on_previous_text=True,
                 no_speech_threshold=self.NO_SPEECH_PROB_THRESHOLD,
                 log_prob_threshold=-1.0,
                 initial_prompt="This is a lecture transcription. The speaker is discussing academic topics.",
                 hallucination_silence_threshold=2.0,
             )
+            
+            # Add language only if explicitly set (None = auto-detect)
+            if self.language:
+                transcribe_kwargs["language"] = self.language
+            
+            segments, info = self.model.transcribe(audio_data, **transcribe_kwargs)
+            
+            if not self.language:
+                print(f"🌐 Detected language: {info.language} (prob={info.language_probability:.2f})")
             
             # Extract text with per-segment filtering
             valid_segments = []
@@ -371,9 +381,15 @@ class AudioTranscriber:
                     print(f"🔄 SKIPPED similar to last: {text[:40]}...")
                     return ""
                 
+                # Remove repeated words from overlap region
+                text = self._remove_overlap_repetition(text)
+                if not text or len(text.strip()) < 3:
+                    return ""
+                
                 # NEW TEXT - send it
-                self.all_transcribed_texts.add(text_lower)
+                self.all_transcribed_texts.add(text.lower().strip())
                 self.last_text = text
+                self.last_words = text.lower().split()
                 print(f"✅ NEW: {text}")
                 return text
             
@@ -392,6 +408,32 @@ class AudioTranscriber:
         intersection = words_a & words_b
         union = words_a | words_b
         return len(intersection) / len(union)
+    
+    def _remove_overlap_repetition(self, text: str) -> str:
+        """Remove words at the start that were already in the previous chunk's tail.
+        This happens because of the 1.5s audio overlap between chunks."""
+        if not self.last_words:
+            return text
+        
+        words = text.split()
+        if len(words) < 3:
+            return text
+        
+        # Check how many leading words of this chunk match the tail of last chunk
+        last_tail = self.last_words[-8:]  # Check up to last 8 words
+        
+        best_overlap = 0
+        for overlap_len in range(1, min(len(words), len(last_tail)) + 1):
+            # Compare tail of last chunk with head of this chunk
+            if last_tail[-overlap_len:] == [w.lower() for w in words[:overlap_len]]:
+                best_overlap = overlap_len
+        
+        if best_overlap > 0:
+            trimmed = ' '.join(words[best_overlap:])
+            print(f"✂️  Trimmed {best_overlap} overlapping words: '{' '.join(words[:best_overlap])}'")
+            return trimmed
+        
+        return text
 
 # Global transcriber instance
 _transcriber: Optional[AudioTranscriber] = None
@@ -400,7 +442,7 @@ def get_transcriber() -> AudioTranscriber:
     """Get or create transcriber instance"""
     global _transcriber
     if _transcriber is None:
-        _transcriber = AudioTranscriber(model_size="small", device="cuda")
+        _transcriber = AudioTranscriber(model_size="medium", device="cuda")
     return _transcriber
 
 def is_whisper_available() -> bool:
