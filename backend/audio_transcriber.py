@@ -57,9 +57,12 @@ HALLUCINATION_PATTERNS = [
     r"구독",
     # Repetition hallucinations
     r"^(.{2,30})\s*\1{2,}$",  # Same phrase repeated 3+ times
-    # Initial prompt leak
+    # Initial prompt leak (Whisper rephrases these in various ways)
     r"the speaker is discussing academic topics",
     r"this is a lecture transcription",
+    r"this is a lecture on academic",
+    r"^this is a lecture\b",
+    r"lecture transcription\.\s*the speaker",
     # Generic filler hallucinations
     r"^(um+|uh+|ah+|oh+|hmm+)[\s\.]*$",
     r"^\.+$",
