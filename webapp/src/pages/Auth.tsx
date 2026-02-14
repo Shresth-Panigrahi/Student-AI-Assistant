@@ -36,6 +36,7 @@ export default function Auth() {
       if (result.success) {
         // Store user data
         localStorage.setItem('user', JSON.stringify(result.user))
+        window.dispatchEvent(new Event('auth-change'))
         // Navigate to session
         navigate('/session')
       } else {
@@ -59,6 +60,7 @@ export default function Auth() {
       if (result.success) {
         // Store user data and navigate
         localStorage.setItem('user', JSON.stringify(result.user))
+        window.dispatchEvent(new Event('auth-change'))
         // Navigate to session
         navigate('/session')
       } else {
@@ -95,7 +97,7 @@ export default function Auth() {
         {/* Auth Card */}
         <div className="glass-effect rounded-2xl p-8">
           {/* Toggle */}
-          <div className="flex gap-2 mb-6 p-1 bg-dark-800 rounded-lg">
+          <div className="flex gap-2 mb-6 p-1 bg-dark-gray rounded-lg">
             <button
               onClick={() => setIsLogin(true)}
               className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${isLogin ? 'bg-accent-blue text-white' : 'text-gray-400'
@@ -128,7 +130,7 @@ export default function Auth() {
                     type="text"
                     value={loginData.username_or_email}
                     onChange={(e) => setLoginData({ ...loginData, username_or_email: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-gray-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
                     placeholder="Enter username or email"
                     required
                   />
@@ -143,7 +145,7 @@ export default function Auth() {
                     type="password"
                     value={loginData.password}
                     onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-gray-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
                     placeholder="Enter password"
                     required
                   />
@@ -171,7 +173,7 @@ export default function Auth() {
                     type="text"
                     value={signupData.name}
                     onChange={(e) => setSignupData({ ...signupData, name: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-gray-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
                     placeholder="Enter your name"
                     required
                   />
@@ -186,7 +188,7 @@ export default function Auth() {
                     type="text"
                     value={signupData.username}
                     onChange={(e) => setSignupData({ ...signupData, username: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-gray-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
                     placeholder="Choose a username"
                     required
                   />
@@ -201,7 +203,7 @@ export default function Auth() {
                     type="email"
                     value={signupData.email}
                     onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-gray-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
                     placeholder="Enter your email"
                     required
                   />
@@ -216,7 +218,7 @@ export default function Auth() {
                     type="password"
                     value={signupData.password}
                     onChange={(e) => setSignupData({ ...signupData, password: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-gray-700 rounded-lg pl-10 pr-4 py-3 text-white focus:outline-none focus:border-accent-blue transition-colors"
                     placeholder="Create a password"
                     required
                   />

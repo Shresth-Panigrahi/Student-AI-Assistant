@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import Auth from './pages/Auth'
 import RecordingSession from './pages/RecordingSession'
 import History from './pages/History'
@@ -6,7 +7,23 @@ import TranscriptDetail from './pages/TranscriptDetail'
 import LandingPage from './pages/LandingPage'
 
 function AppContent() {
-  const isAuth = !!localStorage.getItem('user')
+  const [isAuth, setIsAuth] = useState(!!localStorage.getItem('user'))
+
+  // Listen for storage changes (login/signup sets 'user' in localStorage)
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setIsAuth(!!localStorage.getItem('user'))
+    }
+
+    // Listen to both storage events and a custom event for same-tab updates
+    window.addEventListener('storage', handleStorageChange)
+    window.addEventListener('auth-change', handleStorageChange)
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('auth-change', handleStorageChange)
+    }
+  }, [])
 
   return (
     <div className="min-h-screen bg-true-black">

@@ -6,6 +6,63 @@ export interface Message {
   timestamp: Date
 }
 
+export interface Flashcard {
+  card_id: string
+  front: string
+  back: string
+  card_type: string
+  difficulty: string
+  tags: string[]
+}
+
+export interface FlashcardSet {
+  flashcard_set_id: string
+  session_id: string
+  num_cards: number
+  cards: Flashcard[]
+}
+
+export interface OneWordQuestion {
+  question_id: string
+  question_text: string
+  correct_answer: string
+  acceptable_answers: string[]
+  hint?: string
+  category: string
+}
+
+export interface OneWordQuestionSet {
+  question_set_id: string
+  session_id: string
+  num_questions: number
+  questions: OneWordQuestion[]
+}
+
+export interface ShortAnswerQuestion {
+  question_id: string
+  question_text: string
+  sample_answer: string
+  key_points: string[]
+  difficulty: string
+  topic: string
+}
+
+export interface ShortAnswerQuestionSet {
+  question_set_id: string
+  session_id: string
+  num_questions: number
+  questions: ShortAnswerQuestion[]
+}
+
+export interface TranslationLog {
+  translation_id: string
+  session_id: string
+  original_text: string
+  translated_text: string
+  source_language: string
+  target_language: string
+}
+
 export interface Session {
   id: string
   name: string
@@ -15,6 +72,10 @@ export interface Session {
   summary?: string
   terminologies?: Record<string, any>
   qa?: Array<{ question: string; answer: string }>
+  flashcards?: FlashcardSet
+  one_word_questions?: OneWordQuestionSet
+  short_answer_questions?: ShortAnswerQuestionSet
+  translations?: TranslationLog[]
 }
 
 interface AppState {
@@ -24,7 +85,7 @@ interface AppState {
   sessions: Session[]
   currentSession: Session | null
   isProcessing: boolean
-  
+
   setRecording: (recording: boolean) => void
   appendTranscript: (text: string) => void
   addMessage: (message: Message) => void
@@ -41,7 +102,7 @@ export const useStore = create<AppState>((set) => ({
   sessions: [],
   currentSession: null,
   isProcessing: false,
-  
+
   setRecording: (recording) => set({ isRecording: recording }),
   appendTranscript: (text) => set((state) => ({ transcript: state.transcript + text })),
   addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),

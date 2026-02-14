@@ -4,7 +4,11 @@ Analyzes transcript and answers questions based on context
 Think Mode: Uses Tavily web search for additional context
 """
 import os
-import google.generativeai as genai
+import warnings
+# Suppress Google Generative AI deprecation warning
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", category=FutureWarning)
+    import google.generativeai as genai
 from typing import Optional, List, Dict
 from dotenv import load_dotenv
 
