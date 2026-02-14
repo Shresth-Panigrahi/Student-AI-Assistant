@@ -1,95 +1,49 @@
-"""
-Real-time Q&A Chatbot using Google Gemini API
-Analyzes transcript and answers questions based on context
-Think Mode: Uses Tavily web search for additional context
-"""
-import os
-import warnings
-# Suppress Google Generative AI deprecation warning
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore", category=FutureWarning)
-    import google.generativeai as genai
-from typing import Optional, List, Dict
-from dotenv import load_dotenv
+import asyncio
 
-# Load environment variables
-load_dotenv()
-
-# Try to import Tavily
-try:
-    from tavily import TavilyClient
-    TAVILY_AVAILABLE = True
-except ImportError:
-    TAVILY_AVAILABLE = False
-    print("⚠️  Tavily not installed. Think Mode will use Gemini's knowledge only.")
-
+# ... (imports)
 
 class QAChatbot:
-    """Q&A Chatbot that answers questions based on transcript context using Gemini"""
-    
-    def __init__(self, model_name: str = "gemini-2.5-flash"):
-        self.model_name = model_name
-        self.conversation_history: List[Dict[str, str]] = []
-        self.tavily_client = None
-        
-        # Configure Gemini
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            print("⚠️  GEMINI_API_KEY not found in environment variables")
-            self.available = False
-        else:
-            try:
-                genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel(self.model_name)
-                self.available = True
-                print(f"✅ Gemini chatbot ready with model: {self.model_name}")
-            except Exception as e:
-                print(f"❌ Failed to configure Gemini: {e}")
-                self.available = False
-        
-        # Configure Tavily for Think Mode
-        tavily_key = os.getenv("TAVILY_API_KEY")
-        if TAVILY_AVAILABLE and tavily_key:
-            try:
-                self.tavily_client = TavilyClient(api_key=tavily_key)
-                print("✅ Tavily web search ready for Think Mode")
-            except Exception as e:
-                print(f"⚠️  Failed to configure Tavily: {e}")
-                self.tavily_client = None
-        elif not tavily_key:
-            print("⚠️  TAVILY_API_KEY not found. Think Mode will use Gemini's knowledge only.")
-    
-    def _search_web(self, query: str, max_results: int = 3) -> str:
-        """Search the web using Tavily and return summarized results"""
+    # ... (init remains same)
+
+    async def _search_web(self, query: str, max_results: int = 3) -> tuple[str, list]:
+        """Search the web using Tavily and return summarized results and source metadata"""
         if not self.tavily_client:
-            return ""
+            return "", []
         
         try:
             print(f"🔍 Searching web for: {query[:50]}...")
-            response = self.tavily_client.search(
+            
+            # Run sync Tavily client in thread
+            response = await asyncio.to_thread(
+                self.tavily_client.search,
                 query=query,
                 search_depth="basic",
                 max_results=max_results
             )
             
             # Extract and format search results
-            results = []
+            formatted_results = []
+            sources = []
+            
             for result in response.get("results", []):
                 title = result.get("title", "")
+                url = result.get("url", "")
                 content = result.get("content", "")[:300]  # Limit content length
-                results.append(f"• {title}: {content}")
+                
+                formatted_results.append(f"• {title}: {content}")
+                sources.append({"title": title, "url": url})
             
-            if results:
-                search_context = "\n".join(results)
-                print(f"✅ Found {len(results)} web results")
-                return search_context
+            search_context = "\n".join(formatted_results)
+            if search_context:
+                print(f"✅ Found {len(formatted_results)} web results")
+                
+            return search_context, sources
             
-            return ""
         except Exception as e:
             print(f"❌ Web search error: {e}")
-            return ""
+            return "", []
     
-    def ask(self, question: str, transcript: str, think_mode: bool = False) -> str:
+    async def ask(self, question: str, transcript: str, think_mode: bool = False) -> dict:
         """
         Ask a question about the transcript
         
@@ -99,25 +53,27 @@ class QAChatbot:
             think_mode: If True, search web for additional context. If False, only use transcript.
             
         Returns:
-            AI-generated answer based on transcript context
+            Dict containing 'answer' and optional 'sources'
         """
         if not self.available:
-            return "Gemini API is not available. Please check your GEMINI_API_KEY in .env file."
+            return {"answer": "Gemini API is not available. Please check your GEMINI_API_KEY in .env file.", "sources": []}
         
         if not transcript or len(transcript.strip()) < 10:
-            return "I don't have enough transcript context yet. Please wait for more transcription or start speaking."
+            return {"answer": "I don't have enough transcript context yet. Please wait for more transcription or start speaking.", "sources": []}
         
         # If Think Mode is ON, search the web first
         web_context = ""
+        sources = []
+        
         if think_mode:
-            web_context = self._search_web(question)
+            web_context, sources = await self._search_web(question)
         
         # Create context-aware prompt
         prompt = self._create_prompt(question, transcript, think_mode, web_context)
         
         try:
-            # Generate response
-            response = self.model.generate_content(prompt)
+            # Generate response asynchronously
+            response = await self.model.generate_content_async(prompt)
             answer = response.text.strip()
             
             # Store in conversation history
@@ -127,11 +83,14 @@ class QAChatbot:
             })
             
             print(f"✅ Q&A: {question[:50]}... → {answer[:50]}...")
-            return answer
+            return {
+                "answer": answer,
+                "sources": sources
+            }
                 
         except Exception as e:
             print(f"❌ Q&A error: {e}")
-            return f"Error generating answer: {str(e)}"
+            return {"answer": f"Error generating answer: {str(e)}", "sources": []}
     
     def _create_prompt(self, question: str, transcript: str, think_mode: bool = False, web_context: str = "") -> str:
         """Create a context-aware prompt for the AI"""

@@ -163,7 +163,12 @@ export default function RecordingSession() {
       const filteredMessages = messages.filter(m => m.content !== '🤔 Thinking...')
       useStore.setState({ messages: filteredMessages })
 
-      const aiMessage = { role: 'ai' as const, content: response.answer, timestamp: new Date() }
+      const aiMessage = {
+        role: 'ai' as const,
+        content: response.answer,
+        timestamp: new Date(),
+        sources: response.sources
+      }
       addMessage(aiMessage)
 
       if (chatRef.current) {
@@ -338,7 +343,7 @@ export default function RecordingSession() {
 
             <div
               ref={chatRef}
-              className="flex-1 bg-black/20 rounded-2xl p-6 mb-6 overflow-y-auto space-y-6 relative z-10"
+              className="flex-1 bg-black/20 rounded-2xl p-6 mb-6 overflow-y-auto space-y-6 relative z-10 custom-scrollbar"
             >
               <AnimatePresence>
                 {messages.length === 0 ? (
@@ -361,7 +366,31 @@ export default function RecordingSession() {
                       <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">
                         {msg.role === 'user' ? 'You' : 'AI Assistant'}
                       </p>
-                      <p className="text-sm text-gray-200 leading-relaxed">{msg.content}</p>
+                      <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+
+                      {/* Display Sources if available */}
+                      {msg.sources && msg.sources.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-white/10">
+                          <p className="text-[10px] font-semibold text-gray-400 mb-2 uppercase tracking-wider flex items-center gap-1">
+                            <i className="w-1 h-1 rounded-full bg-sky-400 float-left mr-1 mt-0.5" />
+                            Sources
+                          </p>
+                          <div className="space-y-1">
+                            {msg.sources.map((source, sIdx) => (
+                              <a
+                                key={sIdx}
+                                href={source.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block text-xs text-sky-400/80 hover:text-sky-300 truncate hover:underline transition-colors flex items-center gap-1"
+                              >
+                                <span className="opacity-50">🔗</span>
+                                {source.title}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </motion.div>
                   ))
                 )}

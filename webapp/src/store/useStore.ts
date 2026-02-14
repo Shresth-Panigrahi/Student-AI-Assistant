@@ -4,6 +4,7 @@ export interface Message {
   role: 'user' | 'ai'
   content: string
   timestamp: Date
+  sources?: Array<{ title: string; url: string }>
 }
 
 export interface Flashcard {

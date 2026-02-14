@@ -25,12 +25,14 @@ async def ask_question(request: QuestionRequest):
         return {"success": False, "answer": "Not enough transcript yet."}
     
     chatbot = get_chatbot()
-    answer = chatbot.ask(request.question, transcript, request.think_mode)
+    # Call async ask method
+    result = await chatbot.ask(request.question, transcript, request.think_mode)
     
     return {
         "success": True,
         "question": request.question,
-        "answer": answer,
+        "answer": result.get("answer"),
+        "sources": result.get("sources", []),
         "think_mode": request.think_mode
     }
 
