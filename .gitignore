@@ -1,0 +1,61 @@
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+.venv/
+
+# Environment Variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# MacOS
+.DS_Store
+
+# Logs
+*.log
+
+# Databases
+*.db
+*.sqlite3
+
+# Project specific
+backend/venv/
+backend/.env
+backend/ai_assistant.db
+backend/test_output.txt
+backend/test_insecure_output.txt
+
+# Agent and temporary files
+.agent/
+webapp/node_modules_old_*/
