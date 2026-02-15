@@ -29,7 +29,7 @@ const Navbar = () => {
                         <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
                     </div>
                     <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-light-gray whitespace-nowrap">
-                        Student AI Assistant
+                        Lecture Lyft
                     </span>
                 </div>
 

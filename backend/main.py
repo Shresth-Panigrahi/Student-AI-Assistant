@@ -11,6 +11,11 @@ import hashlib
 import re
 from dotenv import load_dotenv
 from groq import Groq
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.errors import RateLimitExceeded
+from fastapi import Request
 
 load_dotenv()
 try:
@@ -32,7 +37,7 @@ from summarizer import summarize_transcript as lc_summarize
 from terminology_extractor import extract_terminologies as lc_extract_terms
 from qa_generator import generate_qa as lc_generate_qa
 
-app = FastAPI(title="AI Student Assistant API")
+app = FastAPI(title="Lecture Lyft API")
 
 # CORS middleware
 app.add_middleware(
@@ -42,6 +47,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Initialize Rate Limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # Global state for current session only
 current_session = {
@@ -108,7 +120,7 @@ print("✅ Using MongoDB Atlas (Cloud)")
 # Routes
 @app.get("/")
 async def root():
-    return {"message": "AI Student Assistant API", "status": "running"}
+    return {"message": "Lecture Lyft API", "status": "running"}
 
 @app.get("/api/health")
 async def health_check():
@@ -126,7 +138,8 @@ async def health_check():
     }
 
 @app.post("/api/session/start")
-async def start_session(request: StartSessionRequest = StartSessionRequest()):
+@limiter.limit("5/minute")
+async def start_session(request: Request, body: StartSessionRequest = StartSessionRequest()):
     """Start a new recording session with real Whisper transcription"""
     global transcription_queue
     
@@ -155,8 +168,8 @@ async def start_session(request: StartSessionRequest = StartSessionRequest()):
     transcriber = get_transcriber()
     
     # Set topic if provided (generates keywords via Gemini AI)
-    if request.topic and request.topic.strip():
-        transcriber.set_topic(request.topic.strip())
+    if body.topic and body.topic.strip():
+        transcriber.set_topic(body.topic.strip())
     else:
         transcriber.set_topic("")  # Reset to default
     
@@ -240,23 +253,24 @@ async def clear_session():
     return {"success": True, "message": "Session cleared"}
 
 @app.post("/api/session/save")
-async def save_session(request: SaveSessionRequest):
+@limiter.limit("5/minute")
+async def save_session(request: Request, body: SaveSessionRequest):
     """Save the current session with refined transcript"""
     session_id = f"session_{int(datetime.now().timestamp())}"
     
     # Use provided name or generate default
-    if request.name and request.name.strip():
-        session_name = request.name.strip()
+    if body.name and body.name.strip():
+        session_name = body.name.strip()
     else:
         stats = db.get_database_stats()
         session_name = f"Session {stats['sessions'] + 1}"
     
     # Refine the transcript before saving
-    refined_transcript = request.transcript
+    refined_transcript = body.transcript
     
-    if is_ollama_available() and len(request.transcript.strip()) > 50:
+    if is_ollama_available() and len(body.transcript.strip()) > 50:
         try:
-            print(f"🔄 Refining transcript ({len(request.transcript)} chars)...")
+            print(f"🔄 Refining transcript ({len(body.transcript)} chars)...")
             
             prompt = f"""You are a professional transcript editor. Clean up this lecture transcript by removing ALL repetitions and errors.
 
@@ -286,7 +300,7 @@ Output: "The physical layer, data link layer, and network layer each handle tran
 
 Now clean this transcript. Remove ALL repetitions and merge similar content:
 
-{request.transcript}
+{body.transcript}
 
 CLEANED TRANSCRIPT:"""
             
@@ -318,7 +332,7 @@ CLEANED TRANSCRIPT:"""
                     break
             
             print(f"✅ Transcript refined: {len(refined_transcript)} chars")
-            print(f"📝 Original: {request.transcript[:100]}...")
+            print(f"📝 Original: {body.transcript[:100]}...")
             print(f"✨ Refined: {refined_transcript[:100]}...")
                 
         except Exception as e:
@@ -329,7 +343,7 @@ CLEANED TRANSCRIPT:"""
         session_id=session_id,
         name=session_name,
         transcript=refined_transcript,
-        chat_messages=request.chat
+        chat_messages=body.chat
     )
     
     if success:
@@ -337,7 +351,7 @@ CLEANED TRANSCRIPT:"""
             "success": True,
             "sessionId": session_id,
             "message": "Session saved with refined transcript",
-            "refined": refined_transcript != request.transcript
+            "refined": refined_transcript != body.transcript
         }
     else:
         raise HTTPException(status_code=500, detail="Failed to save session")
@@ -365,14 +379,15 @@ async def delete_session(session_id: str):
     raise HTTPException(status_code=404, detail="Session not found")
 
 @app.post("/api/qa/ask")
-async def ask_question(request: QuestionRequest):
+@limiter.limit("20/minute")
+async def ask_question(request: Request, body: QuestionRequest):
     """Ask a question to the AI based on transcript context"""
     
     # Check if Ollama is available
     if not is_ollama_available():
         return {
             "success": False,
-            "question": request.question,
+            "question": body.question,
             "answer": "Ollama is not available. Please start Ollama with: ollama serve"
         }
     
@@ -382,7 +397,7 @@ async def ask_question(request: QuestionRequest):
     if not transcript or len(transcript.strip()) < 10:
         return {
             "success": False,
-            "question": request.question,
+            "question": body.question,
             "answer": "Not enough transcript yet. Please wait for more transcription or start speaking."
         }
     
@@ -391,20 +406,21 @@ async def ask_question(request: QuestionRequest):
     
     # Run synchronous Gemini call in a separate thread to avoid blocking the event loop
     loop = asyncio.get_event_loop()
-    answer = await loop.run_in_executor(None, chatbot.ask, request.question, transcript, request.think_mode)
+    answer = await loop.run_in_executor(None, chatbot.ask, body.question, transcript, body.think_mode)
     
     return {
         "success": True,
-        "question": request.question,
+        "question": body.question,
         "answer": answer,
-        "think_mode": request.think_mode,
+        "think_mode": body.think_mode,
         "transcript_length": len(transcript)
     }
 
 @app.post("/api/analyze/summarize")
-async def summarize_transcript(request: AnalyzeRequest):
+@limiter.limit("5/minute")
+async def summarize_transcript(request: Request, body: AnalyzeRequest):
     """Summarize a transcript using LangChain + LangGraph"""
-    session = db.get_session_by_id(request.sessionId)
+    session = db.get_session_by_id(body.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -422,7 +438,7 @@ async def summarize_transcript(request: AnalyzeRequest):
             return {"success": False, "message": result["error"]}
         
         # Save to database
-        db.update_session_summary(request.sessionId, result["summary"])
+        db.update_session_summary(body.sessionId, result["summary"])
         
         return {
             "success": True,
@@ -436,9 +452,10 @@ async def summarize_transcript(request: AnalyzeRequest):
         return {"success": False, "message": f"Failed to generate summary: {str(e)}"}
 
 @app.post("/api/analyze/terminologies")
-async def extract_terminologies(request: AnalyzeRequest):
+@limiter.limit("5/minute")
+async def extract_terminologies(request: Request, body: AnalyzeRequest):
     """Extract terminologies from a transcript using LangChain + LangGraph"""
-    session = db.get_session_by_id(request.sessionId)
+    session = db.get_session_by_id(body.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -456,7 +473,7 @@ async def extract_terminologies(request: AnalyzeRequest):
             return {"success": False, "message": result["error"]}
         
         # Save to database
-        db.add_terminologies(request.sessionId, result["terminologies"])
+        db.add_terminologies(body.sessionId, result["terminologies"])
         
         return {
             "success": True,
@@ -470,9 +487,10 @@ async def extract_terminologies(request: AnalyzeRequest):
         return {"success": False, "message": f"Failed to extract terminologies: {str(e)}"}
 
 @app.post("/api/analyze/qa")
-async def generate_qa(request: AnalyzeRequest):
+@limiter.limit("5/minute")
+async def generate_qa(request: Request, body: AnalyzeRequest):
     """Generate Q&A from transcript using LangChain + LangGraph"""
-    session = db.get_session_by_id(request.sessionId)
+    session = db.get_session_by_id(body.sessionId)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -493,7 +511,7 @@ async def generate_qa(request: AnalyzeRequest):
             return {"success": False, "message": "Could not generate enough questions. Please try again."}
         
         # Save Q&A to database
-        db.add_qa_pairs(request.sessionId, result["qa_pairs"])
+        db.add_qa_pairs(body.sessionId, result["qa_pairs"])
         
         return {
             "success": True,
@@ -547,53 +565,55 @@ def validate_password(password: str) -> tuple[bool, str]:
     return True, ""
 
 @app.post("/api/auth/signup")
-async def signup(request: SignupRequest):
+@limiter.limit("5/minute")
+async def signup(request: Request, body: SignupRequest):
     """Register a new user"""
     # Validate password
-    is_valid, error_msg = validate_password(request.password)
+    is_valid, error_msg = validate_password(body.password)
     if not is_valid:
         return {"success": False, "message": error_msg}
     
     # Check if username exists
-    existing_user = db.get_user_by_username(request.username)
+    existing_user = db.get_user_by_username(body.username)
     if existing_user:
         return {"success": False, "message": "Username already exists"}
     
     # Check if email exists
-    existing_email = db.get_user_by_email(request.email)
+    existing_email = db.get_user_by_email(body.email)
     if existing_email:
         return {"success": False, "message": "Email already registered"}
     
     # Hash password and create user
-    password_hash = hash_password(request.password)
-    success = db.create_user(request.name, request.username, request.email, password_hash)
+    password_hash = hash_password(body.password)
+    success = db.create_user(body.name, body.username, body.email, password_hash)
     
     if success:
         return {
             "success": True,
             "message": "Account created successfully",
             "user": {
-                "name": request.name,
-                "username": request.username,
-                "email": request.email
+                "name": body.name,
+                "username": body.username,
+                "email": body.email
             }
         }
     else:
         return {"success": False, "message": "Failed to create account"}
 
 @app.post("/api/auth/login")
-async def login(request: LoginRequest):
+@limiter.limit("10/minute")
+async def login(request: Request, body: LoginRequest):
     """Login user"""
     # Try to find user by username or email
-    user = db.get_user_by_username(request.username_or_email)
+    user = db.get_user_by_username(body.username_or_email)
     if not user:
-        user = db.get_user_by_email(request.username_or_email)
+        user = db.get_user_by_email(body.username_or_email)
     
     if not user:
         return {"success": False, "message": "User not found. Please sign up."}
     
     # Verify password
-    password_hash = hash_password(request.password)
+    password_hash = hash_password(body.password)
     if password_hash != user['password_hash']:
         return {"success": False, "message": "Wrong password"}
     

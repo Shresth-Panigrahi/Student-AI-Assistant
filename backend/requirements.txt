@@ -8,4 +8,5 @@ pymongo>=4.6.0
 python-dotenv>=1.0.0
 langchain-groq>=0.1.0
 langgraph>=0.0.30
+slowapi>=0.1.9
 langchain-core>=0.1.0
