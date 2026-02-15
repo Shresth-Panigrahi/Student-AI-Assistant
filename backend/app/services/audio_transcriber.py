@@ -16,14 +16,13 @@ from concurrent.futures import ThreadPoolExecutor
 # Load environment variables
 load_dotenv()
 
-# Try to import audio libraries
 try:
     import sounddevice as sd
     import soundfile as sf
     AUDIO_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     AUDIO_AVAILABLE = False
-    print("⚠️  Audio libraries not available")
+    print("⚠️  Audio libraries not available (Server mode)")
 
 # Try to import Cloudinary
 try:
