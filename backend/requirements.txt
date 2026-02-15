@@ -1,0 +1,30 @@
+# AI Student Assistant - Requirements
+# Core backend dependencies only
+
+# Audio capture and processing
+sounddevice>=0.4.6
+numpy>=1.24.0
+webrtcvad>=2.0.10
+soundfile>=0.12.1
+
+# Backend server
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+websockets>=12.0
+pydantic>=2.7.4
+python-multipart>=0.0.6
+
+# AI (Gemini)
+google-generativeai
+
+# Web Search (for Think Mode)
+tavily-python
+
+# Utilities
+python-dotenv>=1.0.0
+requests>=2.31.0
+cloudinary>=1.36.0
+
+# Database
+motor>=3.3.0
+dnspython>=2.6.0
