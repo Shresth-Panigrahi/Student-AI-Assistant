@@ -76,6 +76,9 @@ class LoginRequest(BaseModel):
     username_or_email: str
     password: str
 
+class StartSessionRequest(BaseModel):
+    topic: Optional[str] = None
+
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
@@ -123,7 +126,7 @@ async def health_check():
     }
 
 @app.post("/api/session/start")
-async def start_session():
+async def start_session(request: StartSessionRequest = StartSessionRequest()):
     """Start a new recording session with real Whisper transcription"""
     global transcription_queue
     
@@ -150,6 +153,12 @@ async def start_session():
     
     # Start real audio transcription
     transcriber = get_transcriber()
+    
+    # Set topic if provided (generates keywords via Gemini AI)
+    if request.topic and request.topic.strip():
+        transcriber.set_topic(request.topic.strip())
+    else:
+        transcriber.set_topic("")  # Reset to default
     
     # Track sent texts to prevent duplicates
     sent_texts = set()

@@ -10,8 +10,9 @@ import sounddevice as sd
 import queue
 import threading
 import re
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 import time
+from course_prompts import generate_keywords, build_initial_prompt, build_leak_patterns, build_generic_leak_patterns
 
 # Try to import Whisper
 try:
@@ -57,12 +58,8 @@ HALLUCINATION_PATTERNS = [
     r"구독",
     # Repetition hallucinations
     r"^(.{2,30})\s*\1{2,}$",  # Same phrase repeated 3+ times
-    # Initial prompt leak (Whisper rephrases these in various ways)
-    r"the speaker is discussing academic topics",
-    r"this is a lecture transcription",
-    r"this is a lecture on academic",
-    r"^this is a lecture\b",
-    r"lecture transcription\.\s*the speaker",
+    # NOTE: Initial prompt leak patterns are now generated dynamically
+    # by course_prompts.build_leak_patterns() based on the user's topic
     # Generic filler hallucinations
     r"^(um+|uh+|ah+|oh+|hmm+)[\s\.]*$",
     r"^\.+$",
@@ -85,10 +82,16 @@ COMPILED_HALLUCINATION_PATTERNS = [
 ]
 
 
-def is_hallucination(text: str) -> bool:
+def is_hallucination(text: str, extra_patterns: Optional[List["re.Pattern"]] = None) -> bool:
     """Check if the transcribed text is a known hallucination pattern.
     Only returns True for text that is ENTIRELY garbage (static patterns).
-    For repetition issues, use strip_repetitions() instead."""
+    For repetition issues, use strip_repetitions() instead.
+    
+    Args:
+        text: The transcribed text to check
+        extra_patterns: Optional list of additional compiled regex patterns
+                       (e.g. dynamic prompt-leak patterns from course_prompts)
+    """
     text_stripped = text.strip()
     
     # Too short to be real speech
@@ -99,6 +102,12 @@ def is_hallucination(text: str) -> bool:
     for pattern in COMPILED_HALLUCINATION_PATTERNS:
         if pattern.search(text_stripped):
             return True
+    
+    # Check against dynamic patterns (prompt-leak detection)
+    if extra_patterns:
+        for pattern in extra_patterns:
+            if pattern.search(text_stripped):
+                return True
     
     # Check if text is just punctuation or special characters
     alphanumeric = re.sub(r'[^a-zA-Z0-9]', '', text_stripped)
@@ -226,9 +235,31 @@ class AudioTranscriber:
         self.all_transcribed_texts = set()  # Track everything we've sent
         self.language = "en"  # Auto-detect language (set to "en" to force English)
         
+        # Dynamic prompt & hallucination settings (set via set_topic())
+        self.topic = None
+        self.initial_prompt = "This is a lecture transcription. The speaker is discussing academic topics."
+        self.dynamic_leak_patterns: List["re.Pattern"] = build_generic_leak_patterns()
+        
         # Initialize model
         if WHISPER_AVAILABLE:
             self._load_model()
+    
+    def set_topic(self, topic: str):
+        """Set the lecture topic — generates keywords via Gemini AI,
+        builds a domain-specific initial prompt, and creates
+        hallucination leak patterns dynamically."""
+        self.topic = topic
+        if topic and topic.strip():
+            print(f"📚 Setting lecture topic: '{topic}'")
+            course_name, keywords = generate_keywords(topic)
+            self.initial_prompt = build_initial_prompt(course_name, keywords)
+            self.dynamic_leak_patterns = build_leak_patterns(course_name, keywords)
+            print(f"📝 Initial prompt: {self.initial_prompt[:100]}...")
+        else:
+            # Reset to default
+            self.initial_prompt = "This is a lecture transcription. The speaker is discussing academic topics."
+            self.dynamic_leak_patterns = build_generic_leak_patterns()
+            print("ℹ️  No topic set — using generic initial prompt")
     
     def _load_model(self):
         """Load Whisper model with fallback"""
@@ -389,7 +420,7 @@ class AudioTranscriber:
                 condition_on_previous_text=True,
                 no_speech_threshold=self.NO_SPEECH_PROB_THRESHOLD,
                 log_prob_threshold=-1.0,
-                initial_prompt="This is a lecture transcription. The speaker is discussing academic topics.",
+                initial_prompt=self.initial_prompt,
                 hallucination_silence_threshold=2.0,
             )
             
@@ -413,7 +444,7 @@ class AudioTranscriber:
                     continue
                 
                 # Skip pure hallucinated segments (static patterns only)
-                if is_hallucination(seg_text):
+                if is_hallucination(seg_text, self.dynamic_leak_patterns):
                     print(f"🚫 FILTERED hallucination: {seg_text}")
                     continue
                 
@@ -426,7 +457,7 @@ class AudioTranscriber:
             
             if text and len(text) > 2:
                 # Final hallucination check on combined text
-                if is_hallucination(text):
+                if is_hallucination(text, self.dynamic_leak_patterns):
                     print(f"🚫 FILTERED combined hallucination: {text}")
                     return ""
                 

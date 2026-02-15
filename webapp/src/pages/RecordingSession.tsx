@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Square, Save, Send } from 'lucide-react'
+import { ArrowLeft, Square, Save, Send, BookOpen } from 'lucide-react'
 import { useStore } from '@/store/useStore'
 import { socketService } from '@/services/socket'
 import { api } from '@/services/api'
@@ -14,6 +14,7 @@ export default function RecordingSession() {
   const [question, setQuestion] = useState('')
   const [status, setStatus] = useState<'idle' | 'recording' | 'processing'>('idle')
   const [thinkMode, setThinkMode] = useState(false)
+  const [lectureTopic, setLectureTopic] = useState('')
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [sessionName, setSessionName] = useState('')
   const [isSaving, setIsSaving] = useState(false)
@@ -101,7 +102,7 @@ export default function RecordingSession() {
       // Only clear deduplication tracking for new recording
       receivedTextsRef.current.clear()
 
-      await api.startSession()
+      await api.startSession(lectureTopic.trim() || undefined)
       setRecording(true)
       setStatus('recording')
     } catch (error) {
@@ -223,8 +224,8 @@ export default function RecordingSession() {
               }}
             >
               <div className={`w-4 h-4 rounded-full ${status === 'recording' ? 'bg-red-500 animate-pulse' :
-                  status === 'processing' ? 'bg-orange-500 animate-pulse' :
-                    'bg-gray-500'
+                status === 'processing' ? 'bg-orange-500 animate-pulse' :
+                  'bg-gray-500'
                 }`}
                 style={{
                   boxShadow: status === 'recording' ? '0 0 10px rgba(255,0,0,0.8)' :
@@ -265,6 +266,32 @@ export default function RecordingSession() {
                 </p>
               )}
             </div>
+
+            {/* Lecture Topic Input */}
+            {!isRecording && (
+              <div className="mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <BookOpen className="w-4 h-4 text-cyan-400" />
+                  <span className="text-sm text-gray-400">Lecture Topic (optional)</span>
+                </div>
+                <input
+                  type="text"
+                  value={lectureTopic}
+                  onChange={(e) => setLectureTopic(e.target.value)}
+                  placeholder="e.g., Data Structures, Operating Systems, DBMS..."
+                  className="w-full bg-dark-800 text-white border border-dark-500 rounded-lg px-4 py-2.5 focus:outline-none focus:border-cyan-500 transition-colors placeholder-gray-600 text-sm"
+                  style={{
+                    boxShadow: lectureTopic ? '0 0 10px rgba(0,191,255,0.15)' : 'none',
+                    borderColor: lectureTopic ? 'rgba(0,191,255,0.4)' : undefined
+                  }}
+                />
+                {lectureTopic && (
+                  <p className="text-xs text-cyan-500/70 mt-1.5 ml-1">
+                    ✨ AI will generate domain-specific keywords to improve transcription accuracy
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Controls */}
             <div className="flex gap-4">
@@ -355,8 +382,8 @@ export default function RecordingSession() {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       className={`p-3 rounded-lg ${msg.role === 'user'
-                          ? 'bg-accent-blue/20 ml-8'
-                          : 'bg-dark-700 mr-8'
+                        ? 'bg-accent-blue/20 ml-8'
+                        : 'bg-dark-700 mr-8'
                         }`}
                     >
                       <p className="text-xs text-gray-400 mb-1">
