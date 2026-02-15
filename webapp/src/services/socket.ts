@@ -17,7 +17,12 @@ class WebSocketService {
     this.shouldReconnect = true
 
     try {
-      this.ws = new WebSocket('ws://localhost:8000/ws')
+      const getSocketUrl = () => {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+        const wsUrl = apiUrl.replace(/^http/, 'ws')
+        return `${wsUrl}/ws`
+      }
+      this.ws = new WebSocket(getSocketUrl())
     } catch (error) {
       console.error('Failed to create WebSocket:', error)
       this.isConnecting = false
