@@ -8,7 +8,7 @@ import re
 from typing import TypedDict, List, Dict
 from dotenv import load_dotenv
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
 
@@ -69,10 +69,10 @@ def generate_questions_node(state: QAGeneratorState) -> dict:
     """Generate Q&A pairs from transcript"""
     try:
         # Using a slightly higher temperature to encourage better long-form synthesis
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            temperature=0.5, 
-            google_api_key=os.getenv("GEMINI_API_KEY")
+        llm = ChatGroq(
+            model="moonshotai/kimi-k2-instruct-0905",
+            temperature=0.3,
+            api_key=os.getenv("GROQ_API_KEY")
         )
         
         chain = QA_PROMPT | llm

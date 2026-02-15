@@ -10,13 +10,13 @@ import uvicorn
 import hashlib
 import re
 from dotenv import load_dotenv
-import google.generativeai as genai
+from groq import Groq
 
 load_dotenv()
 try:
-    genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+    _groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 except:
-    pass
+    _groq_client = None
 
 # Import database module (MongoDB)
 import database_mongo as db
@@ -290,9 +290,18 @@ Now clean this transcript. Remove ALL repetitions and merge similar content:
 
 CLEANED TRANSCRIPT:"""
             
-            model = genai.GenerativeModel("gemini-2.0-flash-exp")
-            response = model.generate_content(prompt)
-            refined_transcript = response.text.strip()
+            if _groq_client:
+                completion = _groq_client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": "You are a professional transcript editor."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    model="moonshotai/kimi-k2-instruct-0905",
+                    temperature=0.3
+                )
+                refined_transcript = completion.choices[0].message.content.strip()
+            else:
+                print("⚠️  Groq client not initialized - skipping refinement")
             
             # Remove common LLM prefixes
             prefixes_to_remove = [

@@ -3,7 +3,7 @@ Real-time Q&A Chatbot using Google Gemini API
 Analyzes transcript and answers questions based on context
 """
 import os
-import google.generativeai as genai
+from groq import Groq
 from typing import Optional, List, Dict
 from dotenv import load_dotenv
 
@@ -13,23 +13,22 @@ load_dotenv()
 class QAChatbot:
     """Q&A Chatbot that answers questions based on transcript context using Gemini"""
     
-    def __init__(self, model_name: str = "gemini-2.5-flash"):
+    def __init__(self, model_name: str = "moonshotai/kimi-k2-instruct-0905"):
         self.model_name = model_name
         self.conversation_history: List[Dict[str, str]] = []
         
-        # Configure Gemini
-        api_key = os.getenv("GEMINI_API_KEY")
+        # Configure Groq
+        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
-            print("⚠️  GEMINI_API_KEY not found in environment variables")
+            print("⚠️  GROQ_API_KEY not found in environment variables")
             self.available = False
         else:
             try:
-                genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel(self.model_name)
+                self.client = Groq(api_key=api_key)
                 self.available = True
-                print(f"✅ Gemini chatbot ready with model: {self.model_name}")
+                print(f"✅ Groq chatbot ready with model: {self.model_name}")
             except Exception as e:
-                print(f"❌ Failed to configure Gemini: {e}")
+                print(f"❌ Failed to configure Groq: {e}")
                 self.available = False
     
     def ask(self, question: str, transcript: str, think_mode: bool = False) -> str:
@@ -45,7 +44,7 @@ class QAChatbot:
             AI-generated answer based on transcript context
         """
         if not self.available:
-            return "Gemini API is not available. Please checking your GEMINI_API_KEY in .env file."
+            return "Groq API is not available. Please checking your GROQ_API_KEY in .env file."
         
         if not transcript or len(transcript.strip()) < 10:
             return "I don't have enough transcript context yet. Please wait for more transcription or start speaking."
@@ -55,8 +54,15 @@ class QAChatbot:
         
         try:
             # Generate response
-            response = self.model.generate_content(prompt)
-            answer = response.text.strip()
+            completion = self.client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": "You are a helpful AI assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                model=self.model_name,
+                temperature=0.3,
+            )
+            answer = completion.choices[0].message.content.strip()
             
             # Store in conversation history
             self.conversation_history.append({

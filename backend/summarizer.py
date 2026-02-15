@@ -6,7 +6,7 @@ import os
 from typing import TypedDict
 from dotenv import load_dotenv
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
 
@@ -73,10 +73,10 @@ The second topic covers... [explanation]"""),
 def summarize_node(state: SummarizerState) -> dict:
     """Generate summary from transcript using Gemini via LangChain"""
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
+        llm = ChatGroq(
+            model="moonshotai/kimi-k2-instruct-0905",
             temperature=0.3,
-            google_api_key=os.getenv("GEMINI_API_KEY")
+            api_key=os.getenv("GROQ_API_KEY")
         )
         
         chain = SUMMARIZE_PROMPT | llm

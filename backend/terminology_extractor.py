@@ -8,7 +8,7 @@ import re
 from typing import TypedDict, Dict, Any, List
 from dotenv import load_dotenv
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import StateGraph, END
 
@@ -78,10 +78,10 @@ Return the enriched JSON array:""")
 def extract_terms_node(state: TerminologyState) -> dict:
     """Extract raw terms from transcript"""
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
-            temperature=0.2,
-            google_api_key=os.getenv("GEMINI_API_KEY")
+        llm = ChatGroq(
+            model="moonshotai/kimi-k2-instruct-0905",
+            temperature=0.1,
+            api_key=os.getenv("GROQ_API_KEY")
         )
         
         chain = EXTRACT_PROMPT | llm
@@ -103,10 +103,10 @@ def enrich_terms_node(state: TerminologyState) -> dict:
         return {}
     
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
-            temperature=0.2,
-            google_api_key=os.getenv("GEMINI_API_KEY")
+        llm = ChatGroq(
+            model="moonshotai/kimi-k2-instruct-0905",
+            temperature=0.3,
+            api_key=os.getenv("GROQ_API_KEY")
         )
         
         chain = ENRICH_PROMPT | llm

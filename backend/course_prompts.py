@@ -6,24 +6,23 @@ for Whisper, and creates hallucination leak patterns to filter prompt echoes.
 import os
 import re
 import json
-import google.generativeai as genai
+from groq import Groq
 from typing import Tuple, List, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Configure Gemini
-_gemini_configured = False
+# Configure Groq
+_groq_client = None
 try:
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if api_key:
-        genai.configure(api_key=api_key)
-        _gemini_configured = True
-        print("✅ Gemini configured for course prompts")
+        _groq_client = Groq(api_key=api_key)
+        print("✅ Groq configured for course prompts")
     else:
-        print("⚠️  GEMINI_API_KEY not found — course prompts will use fallback")
+        print("⚠️  GROQ_API_KEY not found — course prompts will use fallback")
 except Exception as e:
-    print(f"⚠️  Failed to configure Gemini for course prompts: {e}")
+    print(f"⚠️  Failed to configure Groq for course prompts: {e}")
 
 
 # ============================================================
@@ -41,13 +40,15 @@ def generate_keywords(topic: str) -> Tuple[str, List[str]]:
         Tuple of (course_name, list_of_keywords)
         Falls back to generic terms if Gemini is unavailable.
     """
-    if not _gemini_configured or not topic or not topic.strip():
+    if not _groq_client or not topic or not topic.strip():
         return _fallback_keywords(topic)
     
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        
-        prompt = f"""You are helping configure a speech-to-text system for a lecture on: "{topic}"
+        completion = _groq_client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""You are helping configure a speech-to-text system for a lecture on: "{topic}"
 
 Return a JSON object with exactly two fields:
 1. "course_name": A clean, concise name for this course/subject (e.g. "Data Structures and Algorithms")
@@ -61,11 +62,16 @@ Example for "DSA":
 
 Now generate for: "{topic}"
 """
+                }
+            ],
+            model="moonshotai/kimi-k2-instruct-0905",
+            temperature=0.3,
+            response_format={"type": "json_object"}
+        )
         
-        response = model.generate_content(prompt)
-        result_text = response.text.strip()
+        result_text = completion.choices[0].message.content.strip()
         
-        # Clean potential markdown fencing
+        # Clean potential markdown fencing (legacy artifact, though json_object mode should prevent this)
         if result_text.startswith("```"):
             result_text = re.sub(r'^```\w*\n?', '', result_text)
             result_text = re.sub(r'\n?```$', '', result_text)
@@ -78,12 +84,12 @@ Now generate for: "{topic}"
         if not keywords:
             return _fallback_keywords(topic)
         
-        print(f"✅ Gemini generated {len(keywords)} keywords for '{course_name}'")
+        print(f"✅ Groq generated {len(keywords)} keywords for '{course_name}'")
         print(f"   Keywords: {', '.join(keywords[:10])}{'...' if len(keywords) > 10 else ''}")
         return course_name, keywords
         
     except Exception as e:
-        print(f"⚠️  Gemini keyword generation failed: {e}")
+        print(f"⚠️  Groq keyword generation failed: {e}")
         return _fallback_keywords(topic)
 
 
