@@ -5,8 +5,9 @@ from app.services.audio_transcriber import get_transcriber
 from app.state import manager
 
 # Import Routers
+# Import Routers
 from app.routers import (
-    auth, session, analysis, 
+    session, analysis, 
     quiz, flashcard, one_word, short_answer, summary, translation
 )
 
@@ -22,7 +23,6 @@ app.add_middleware(
 )
 
 # Include Routers
-app.include_router(auth.router)
 app.include_router(session.router)
 app.include_router(analysis.router)
 app.include_router(quiz.router)
