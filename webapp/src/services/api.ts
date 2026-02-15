@@ -6,7 +6,7 @@ export const api = {
   // Health check
   healthCheck: async () => {
     try {
-      const response = await axios.get('http://localhost:8000/api/health')
+      const response = await axios.get(`${API_BASE}/health`)
       return response.data
     } catch (error) {
       console.error('Health check failed:', error)
