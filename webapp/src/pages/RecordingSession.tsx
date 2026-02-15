@@ -93,19 +93,46 @@ export default function RecordingSession() {
     }
   }, [isRecording])
 
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+
   const handleStart = async () => {
     try {
       receivedTextsRef.current.clear()
       await api.startSession()
+
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      mediaRecorderRef.current = mediaRecorder
+
+      mediaRecorder.ondataavailable = async (event) => {
+        if (event.data.size > 0) {
+          const reader = new FileReader()
+          reader.onloadend = () => {
+            const base64Audio = (reader.result as string).split(',')[1]
+            socketService.send({ type: 'audio', data: base64Audio })
+          }
+          reader.readAsDataURL(event.data)
+        }
+      }
+
+      mediaRecorder.start(4000) // Send chunks every 4 seconds
+
       setRecording(true)
       setStatus('recording')
     } catch (error) {
       console.error('Failed to start session:', error)
+      alert('Could not access microphone. Please ensure permissions are granted.')
     }
   }
 
   const handleStop = async () => {
     try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop()
+        mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop())
+      }
+
       await api.stopSession()
       setRecording(false)
       setStatus('processing')

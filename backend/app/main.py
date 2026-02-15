@@ -57,14 +57,25 @@ async def health_check():
         "database": "connected" if db.client else "disconnected"
     }
 
+import json
+
 # WebSocket endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
+    transcriber = get_transcriber()
     try:
         while True:
             data = await websocket.receive_text()
-            # Handle incoming messages if needed
-            # print(f"Received: {data}")
+            try:
+                message = json.loads(data)
+                if message.get("type") == "audio" and message.get("data"):
+                    # Pass audio data to transcriber
+                    transcriber.process_external_audio(message["data"])
+            except json.JSONDecodeError:
+                pass
+            except Exception as e:
+                print(f"Error processing message: {e}")
+                
     except WebSocketDisconnect:
         manager.disconnect(websocket)

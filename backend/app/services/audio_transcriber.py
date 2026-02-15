@@ -7,7 +7,8 @@ import threading
 import time
 import tempfile
 import queue
-from typing import Callable, Optional
+import base64
+from typing import Callable, Optional, Union
 import numpy as np
 import requests
 from dotenv import load_dotenv
@@ -96,17 +97,21 @@ class AudioTranscriber:
             return audio_data * (0.7 / max_val)
         return audio_data
     
-    def _upload_and_transcribe(self, audio_data: np.ndarray, chunk_id: int) -> Optional[str]:
+    def _upload_and_transcribe(self, audio_data: Union[np.ndarray, bytes], chunk_id: int) -> Optional[str]:
         """Upload audio to Cloudinary and transcribe via OnDemand API."""
         tmp_path = None
         try:
-            # Normalize
-            audio_data = self._normalize_audio(audio_data)
-            
-            # Save to temp file
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                tmp_path = f.name
-                sf.write(tmp_path, audio_data, self.sample_rate)
+            # Handle WebM bytes (from frontend)
+            if isinstance(audio_data, bytes):
+                with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
+                    tmp_path = f.name
+                    f.write(audio_data)
+            else:
+                # Handle Numpy array (from local mic)
+                audio_data = self._normalize_audio(audio_data)
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    tmp_path = f.name
+                    sf.write(tmp_path, audio_data, self.sample_rate)
             
             # Upload to Cloudinary
             result = cloudinary.uploader.upload(
@@ -257,11 +262,24 @@ class AudioTranscriber:
         
         print("📝 Processing thread stopped")
     
+    def process_external_audio(self, base64_audio: str):
+        """Process audio chunk received from frontend."""
+        try:
+            audio_bytes = base64.b64decode(base64_audio)
+            # Use a timestamp-based ID or incrementing ID if possible, for now random/time is fine
+            # But main loop logic uses incrementing. Let's just use time for unique ID logging or manage ID in main
+            # Actually, let's keep it simple.
+            chunk_id = int(time.time() * 1000) 
+            
+            self.audio_queue.put((audio_bytes, chunk_id))
+        except Exception as e:
+            print(f"❌ Error processing external audio: {e}")
+
     def start_recording(self, callback: Callable[[str], None]) -> bool:
         """Start parallel recording and transcription."""
-        if not AUDIO_AVAILABLE:
-            print("❌ Audio not available")
-            return False
+        # if not AUDIO_AVAILABLE:
+        #    print("❌ Audio not available")
+        #    return False
         
         if not self.available:
             print("❌ Transcription not configured")
@@ -281,14 +299,18 @@ class AudioTranscriber:
             except:
                 pass
         
-        # Start BOTH threads
-        self.recording_thread = threading.Thread(target=self._recording_loop, daemon=True)
+        # Start processing thread (ALWAYS)
         self.processing_thread = threading.Thread(target=self._processing_loop, daemon=True)
-        
-        self.recording_thread.start()
         self.processing_thread.start()
-        
-        print("🎤 Recording started (parallel mode - no audio will be missed!)")
+
+        # Start recording thread ONLY if local audio is available
+        if AUDIO_AVAILABLE:
+            self.recording_thread = threading.Thread(target=self._recording_loop, daemon=True)
+            self.recording_thread.start()
+            print("🎤 Local Microphone Recording started")
+        else:
+            print("📡 Remote Streaming Mode started (waiting for WebSocket audio)")
+            
         return True
     
     def stop_recording(self):
@@ -326,4 +348,4 @@ def get_transcriber() -> AudioTranscriber:
 def is_whisper_available() -> bool:
     """Check if transcription is available."""
     transcriber = get_transcriber()
-    return transcriber.available and AUDIO_AVAILABLE
+    return transcriber.available
