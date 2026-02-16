@@ -113,8 +113,8 @@ class AudioTranscriber:
                     tmp_path = f.name
                     sf.write(tmp_path, audio_data, self.sample_rate)
             
-            # Determine resource type (Cloudinary treats WebM as video)
-            resource_type = "video" if tmp_path.endswith(".webm") else "auto"
+            # Determine resource type (Cloudinary treats WebM as video, but raw is safer for chunks)
+            resource_type = "raw" if tmp_path.endswith(".webm") else "auto"
             
             # Upload to Cloudinary
             result = cloudinary.uploader.upload(
