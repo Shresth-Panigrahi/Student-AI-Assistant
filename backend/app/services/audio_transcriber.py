@@ -113,12 +113,15 @@ class AudioTranscriber:
                     tmp_path = f.name
                     sf.write(tmp_path, audio_data, self.sample_rate)
             
+            # Determine resource type (Cloudinary treats WebM as video)
+            resource_type = "video" if tmp_path.endswith(".webm") else "auto"
+            
             # Upload to Cloudinary
             result = cloudinary.uploader.upload(
                 tmp_path,
-                resource_type="auto",
+                resource_type=resource_type,
                 folder="stt_audio",
-                format="wav"
+                # format="wav"  # Let Cloudinary handle format for WebM
             )
             audio_url = result.get("secure_url")
             

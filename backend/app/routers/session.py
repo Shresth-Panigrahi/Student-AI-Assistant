@@ -89,56 +89,62 @@ async def poll_transcription():
 @router.post("/api/session/save")
 async def save_session(request: SaveSessionRequest):
     """Save the current session with refined transcript"""
-    session_id = f"session_{int(datetime.now().timestamp())}"
+    try:
+        session_id = f"session_{int(datetime.now().timestamp())}"
+        
+        if request.name and request.name.strip():
+            session_name = request.name.strip()
+        else:
+            # We need a way to get stats. 
+            # For now, just generate a name based on date
+            session_name = f"Session {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            if db.db is not None:
+                 count = await db.db.sessions.count_documents({})
+                 session_name = f"Session {count + 1}"
     
-    if request.name and request.name.strip():
-        session_name = request.name.strip()
-    else:
-        # We need a way to get stats. 
-        # For now, just generate a name based on date
-        session_name = f"Session {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        if db.db is not None:
-             count = await db.db.sessions.count_documents({})
-             session_name = f"Session {count + 1}"
-
-    refined_transcript = request.transcript
+        refined_transcript = request.transcript
+        
+        # Refine transcript (Migrated logic)
+        if is_ollama_available() and len(request.transcript.strip()) > 50:
+            try:
+                print(f"🔄 Refining transcript ({len(request.transcript)} chars)...")
+                prompt = f"""You are a professional transcript editor. Clean up this lecture transcript.
+                Remove repetitions, fix grammar, merge sentences. Keep original meaning.
+                TRANSCRIPT: {request.transcript}"""
+                
+                refined_transcript = await AIService.generate_content(prompt)
+                print("✅ Transcript refined")
+            except Exception as e:
+                print(f"❌ Refinement error: {e}")
     
-    # Refine transcript (Migrated logic)
-    if is_ollama_available() and len(request.transcript.strip()) > 50:
-        try:
-            print(f"🔄 Refining transcript ({len(request.transcript)} chars)...")
-            prompt = f"""You are a professional transcript editor. Clean up this lecture transcript.
-            Remove repetitions, fix grammar, merge sentences. Keep original meaning.
-            TRANSCRIPT: {request.transcript}"""
-            
-            refined_transcript = await AIService.generate_content(prompt)
-            print("✅ Transcript refined")
-        except Exception as e:
-            print(f"❌ Refinement error: {e}")
-
-    if db.db is None:
-         raise HTTPException(status_code=503, detail="Database not connected")
-
-    # Manual insert to match old structure (or use create_session if I migrate it)
-    # The old `create_session` in `database.py` did insert_one.
-    session_doc = {
-        "id": session_id,
-        "name": session_name,
-        "timestamp": datetime.now(),
-        "transcript": refined_transcript,
-        "chat_messages": request.chat,
-        "terminologies": {}, # Default empty
-        "summary": ""
-    }
+        if db.db is None:
+             raise HTTPException(status_code=503, detail="Database not connected")
     
-    await db.db.sessions.insert_one(session_doc)
-    
-    return {
-        "success": True, 
-        "sessionId": session_id, 
-        "message": "Session saved",
-        "refined": refined_transcript != request.transcript
-    }
+        # Manual insert to match old structure (or use create_session if I migrate it)
+        # The old `create_session` in `database.py` did insert_one.
+        session_doc = {
+            "id": session_id,
+            "name": session_name,
+            "timestamp": datetime.now(),
+            "transcript": refined_transcript,
+            "chat_messages": request.chat,
+            "terminologies": {}, # Default empty
+            "summary": ""
+        }
+        
+        await db.db.sessions.insert_one(session_doc)
+        
+        return {
+            "success": True, 
+            "sessionId": session_id, 
+            "message": "Session saved",
+            "refined": refined_transcript != request.transcript
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"❌ Save Session Error: {e}")
+        return {"success": False, "message": f"Failed to save: {str(e)}"}
 
 @router.get("/api/sessions")
 async def get_sessions():
