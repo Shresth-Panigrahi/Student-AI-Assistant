@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Menu, X } from 'lucide-react';
 
 import { motion } from 'framer-motion'
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 const Navbar = () => {
     const navigate = useNavigate();
@@ -43,14 +43,25 @@ const Navbar = () => {
                         { name: 'Stats', link: '#stats' },
                         { name: 'History', link: '/history' },
                     ].map((item) => (
-                        <a
-                            key={item.name}
-                            href={item.link}
-                            className="text-sm font-medium text-light-gray hover:text-white transition-colors relative group"
-                        >
-                            {item.name}
-                            <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-gradient-to-r from-royal-purple to-deep-magenta group-hover:w-full transition-all duration-300" />
-                        </a>
+                        item.link.startsWith('/') ? (
+                            <Link
+                                key={item.name}
+                                to={item.link}
+                                className="text-sm font-medium text-light-gray hover:text-white transition-colors relative group"
+                            >
+                                {item.name}
+                                <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-gradient-to-r from-royal-purple to-deep-magenta group-hover:w-full transition-all duration-300" />
+                            </Link>
+                        ) : (
+                            <a
+                                key={item.name}
+                                href={item.link}
+                                className="text-sm font-medium text-light-gray hover:text-white transition-colors relative group"
+                            >
+                                {item.name}
+                                <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-gradient-to-r from-royal-purple to-deep-magenta group-hover:w-full transition-all duration-300" />
+                            </a>
+                        )
                     ))}
                 </div>
 
@@ -125,14 +136,25 @@ const Navbar = () => {
                         { name: 'Stats', link: '#stats' },
                         { name: 'History', link: '/history' },
                     ].map((item) => (
-                        <a
-                            key={item.name}
-                            href={item.link}
-                            className="text-light-gray hover:text-white text-lg font-medium py-2"
-                            onClick={() => setIsMobileMenuOpen(false)}
-                        >
-                            {item.name}
-                        </a>
+                        item.link.startsWith('/') ? (
+                            <Link
+                                key={item.name}
+                                to={item.link}
+                                className="text-light-gray hover:text-white text-lg font-medium py-2"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                            >
+                                {item.name}
+                            </Link>
+                        ) : (
+                            <a
+                                key={item.name}
+                                href={item.link}
+                                className="text-light-gray hover:text-white text-lg font-medium py-2"
+                                onClick={() => setIsMobileMenuOpen(false)}
+                            >
+                                {item.name}
+                            </a>
+                        )
                     ))}
                     <button
                         onClick={() => window.location.href = '/session'}
