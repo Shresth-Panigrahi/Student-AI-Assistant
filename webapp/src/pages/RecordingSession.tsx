@@ -55,8 +55,12 @@ export default function RecordingSession() {
     const pollInterval = setInterval(async () => {
       if (isRecording) {
         try {
-          const response = await api.pollTranscription()
-          if (response.texts && response.texts.length > 0) {
+          const response = await api.pollTranscription().catch(err => {
+            console.warn('Poll failed (ignoring):', err.message);
+            return { texts: [] };
+          });
+
+          if (response && response.texts && response.texts.length > 0) {
             response.texts.forEach((text: string) => {
               const trimmedText = text.trim()
               if (!receivedTextsRef.current.has(trimmedText)) {
@@ -69,7 +73,8 @@ export default function RecordingSession() {
             }
           }
         } catch (error) {
-          console.error('Poll error:', error)
+          // Silent catch to prevent unhandled promise noise
+          // console.error('Poll cycle error:', error)
         }
       }
     }, 1000)

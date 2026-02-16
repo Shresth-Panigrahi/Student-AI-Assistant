@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.state import current_session, transcription_queue, manager
-from app.services.audio_transcriber import get_transcriber, is_whisper_available
+from app.services.audio_transcriber import get_transcriber, is_ondemand_available
 from app.services.qa_chatbot import get_chatbot, is_ollama_available
 from app.database import db
 from app.services.ai_service import AIService
@@ -24,7 +24,7 @@ async def start_session():
     transcription_queue.clear()
     
     # Check if OnDemand transcription is available
-    if not is_whisper_available():
+    if not is_ondemand_available():
         await manager.broadcast({"type": "status", "status": "idle"})
         return {"success": False, "message": "OnDemand transcription not configured."}
     
@@ -52,7 +52,7 @@ async def stop_session():
     """Stop the current recording session"""
     current_session["is_recording"] = False
     
-    if is_whisper_available():
+    if is_ondemand_available():
         transcriber = get_transcriber()
         transcriber.stop_recording()
     

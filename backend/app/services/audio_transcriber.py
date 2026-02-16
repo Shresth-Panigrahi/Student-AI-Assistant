@@ -345,7 +345,7 @@ def get_transcriber() -> AudioTranscriber:
     return _transcriber
 
 
-def is_whisper_available() -> bool:
-    """Check if transcription is available."""
+def is_ondemand_available() -> bool:
+    """Check if OnDemand transcription is available."""
     transcriber = get_transcriber()
     return transcriber.available
