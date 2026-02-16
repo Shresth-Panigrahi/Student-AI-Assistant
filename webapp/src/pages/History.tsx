@@ -51,7 +51,7 @@ export default function History() {
   }
 
   const filteredSessions = sessions.filter(session =>
-    session.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (session.name || 'Untitled').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (session.transcript || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
 
@@ -179,7 +179,7 @@ export default function History() {
                       </div>
                       <div className="flex items-center gap-1.5">
                         <MessageSquare className="w-3.5 h-3.5" />
-                        <span>{session.chat?.length || 0} chats</span>
+                        <span>{(session.chat?.length || (session as any).chat_messages?.length || 0)} chats</span>
                       </div>
                     </div>
 

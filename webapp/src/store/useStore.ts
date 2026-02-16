@@ -70,6 +70,7 @@ export interface Session {
   timestamp: string
   transcript: string
   chat: Message[]
+  chat_messages?: Message[]
   summary?: string
   terminologies?: Record<string, any>
   qa?: Array<{ question: string; answer: string }>

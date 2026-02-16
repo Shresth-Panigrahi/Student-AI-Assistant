@@ -148,6 +148,21 @@ async def get_sessions():
     for s in sessions:
         if "_id" in s:
             s["_id"] = str(s["_id"])
+        
+        # Map chat_messages (DB) to chat (Frontend)
+        if "chat_messages" in s:
+            s["chat"] = s["chat_messages"]
+        elif "chat" not in s:
+            s["chat"] = []
+            
+        # Ensure name exists
+        if "name" not in s or not s["name"]:
+            s["name"] = "Untitled Session"
+            
+        # Ensure transcript exists
+        if "transcript" not in s:
+            s["transcript"] = ""
+            
     return {"sessions": sessions}
 
 @router.get("/api/sessions/{session_id}")
@@ -156,6 +171,13 @@ async def get_session(session_id: str):
     session = await db.db.sessions.find_one({"id": session_id})
     if session:
         if "_id" in session: session["_id"] = str(session["_id"])
+        
+        # Map chat_messages to chat
+        if "chat_messages" in session:
+            session["chat"] = session["chat_messages"]
+        elif "chat" not in session:
+             session["chat"] = []
+             
         return {"session": session}
     raise HTTPException(status_code=404, detail="Session not found")
 
