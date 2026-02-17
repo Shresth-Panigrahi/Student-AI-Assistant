@@ -1,8 +1,8 @@
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import { Mic, Cpu, FileText, Search, ArrowRight } from 'lucide-react';
 
-const StepCard = ({ number, title, subtitle, icon: Icon, color }) => (
+const StepCard = ({ number, title, subtitle, icon: Icon, color }: { number: string, title: string, subtitle: string, icon: any, color: string }) => (
     <div className="min-w-[80vw] md:min-w-[60vw] h-[70vh] flex flex-col items-center justify-center p-8 md:p-16 border-r border-white/5 bg-[#0D0D12] relative overflow-hidden group">
         <div className={`absolute inset-0 bg-gradient-to-br ${color} opacity-0 group-hover:opacity-5 transition-opacity duration-700`} />
 

@@ -10,7 +10,7 @@ import LandingPage from './pages/LandingPage'
 // import { useState } from 'react'
 
 function AppContent() {
-  const isAuth = !!localStorage.getItem('user') // Matching Auth.tsx logic
+  // const isAuth = !!localStorage.getItem('user') // Auth bypassed per user request
 
   // Note: Previous "InitialSplash" is removed in favor of LandingPage
 
@@ -24,13 +24,13 @@ function AppContent() {
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<LandingPage />} />
-          <Route path="/auth" element={isAuth ? <Navigate to="/dashboard" replace /> : <Auth />} />
+          <Route path="/auth" element={<Auth />} />
 
-          {/* Protected Routes */}
-          <Route path="/dashboard" element={isAuth ? <Dashboard /> : <Navigate to="/auth" replace />} />
-          <Route path="/session" element={isAuth ? <RecordingSession /> : <Navigate to="/auth" replace />} />
-          <Route path="/history" element={isAuth ? <History /> : <Navigate to="/auth" replace />} />
-          <Route path="/transcript/:id" element={isAuth ? <TranscriptDetail /> : <Navigate to="/auth" replace />} />
+          {/* Protected Routes (Auth removed) */}
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/session" element={<RecordingSession />} />
+          <Route path="/history" element={<History />} />
+          <Route path="/transcript/:id" element={<TranscriptDetail />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

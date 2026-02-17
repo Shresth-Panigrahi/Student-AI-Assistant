@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { GraduationCap, Twitter, Github, Youtube } from 'lucide-react';
 
 const Footer = () => {

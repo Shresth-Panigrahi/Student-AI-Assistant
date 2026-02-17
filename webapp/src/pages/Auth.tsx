@@ -128,7 +128,7 @@ export default function Auth() {
                     type="text"
                     value={loginData.username_or_email}
                     onChange={(e) => setLoginData({ ...loginData, username_or_email: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-white/10 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors text-white placeholder-gray-500"
                     placeholder="Enter username or email"
                     required
                   />
@@ -143,7 +143,7 @@ export default function Auth() {
                     type="password"
                     value={loginData.password}
                     onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-white/10 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors text-white placeholder-gray-500"
                     placeholder="Enter password"
                     required
                   />
@@ -171,7 +171,7 @@ export default function Auth() {
                     type="text"
                     value={signupData.name}
                     onChange={(e) => setSignupData({ ...signupData, name: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-white/10 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors text-white placeholder-gray-500"
                     placeholder="Enter your name"
                     required
                   />
@@ -186,7 +186,7 @@ export default function Auth() {
                     type="text"
                     value={signupData.username}
                     onChange={(e) => setSignupData({ ...signupData, username: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-white/10 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors text-white placeholder-gray-500"
                     placeholder="Choose a username"
                     required
                   />
@@ -201,7 +201,7 @@ export default function Auth() {
                     type="email"
                     value={signupData.email}
                     onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-white/10 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors text-white placeholder-gray-500"
                     placeholder="Enter your email"
                     required
                   />
@@ -216,7 +216,7 @@ export default function Auth() {
                     type="password"
                     value={signupData.password}
                     onChange={(e) => setSignupData({ ...signupData, password: e.target.value })}
-                    className="w-full bg-dark-800 border border-dark-500 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors"
+                    className="w-full bg-dark-gray border border-white/10 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:border-accent-blue transition-colors text-white placeholder-gray-500"
                     placeholder="Create a password"
                     required
                   />

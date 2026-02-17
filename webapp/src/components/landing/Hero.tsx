@@ -1,11 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion';
 import { Mic, Play, ArrowDown, Mouse } from 'lucide-react';
-import gsap from 'gsap';
+// import gsap from 'gsap';
 
 const Hero = () => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const textRef = useRef<HTMLHeadingElement>(null);
+    // const textRef = useRef<HTMLHeadingElement>(null);
     const [typingPhase, setTypingPhase] = useState(0); // 0-3: phases, 4: final
 
     const { scrollY } = useScroll();

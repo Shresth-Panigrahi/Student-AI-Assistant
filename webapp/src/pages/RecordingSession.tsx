@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Square, Save, Send, BookOpen } from 'lucide-react'
+import { ArrowLeft, Square, Save, Send, BookOpen, Mic } from 'lucide-react'
 import { useStore } from '@/store/useStore'
 import { socketService } from '@/services/socket'
 import { api } from '@/services/api'
 import gsap from 'gsap'
 import MicIcon from '@/components/MicIcon'
+import Typewriter from '@/components/Typewriter'
 
 export default function RecordingSession() {
   const navigate = useNavigate()
@@ -192,51 +193,50 @@ export default function RecordingSession() {
   }
 
   return (
-    <div className="min-h-screen p-6" style={{ background: '#000000' }}>
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen relative bg-true-black text-white font-sans selection:bg-royal-purple selection:text-white overflow-hidden">
+      {/* Background Orbs */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-[-10%] left-[-10%] w-[600px] h-[600px] bg-royal-purple/20 rounded-full blur-[100px] animate-pulse-slow" />
+        <div className="absolute top-[20%] right-[-5%] w-[500px] h-[500px] bg-deep-magenta/15 rounded-full blur-[80px] animate-pulse-slow [animation-delay:2s]" />
+        <div className="absolute bottom-[-10%] left-[20%] w-[600px] h-[600px] bg-orchid/10 rounded-full blur-[100px] animate-pulse-slow [animation-delay:4s]" />
+        {/* Grain Overlay */}
+        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03]" />
+      </div>
+
+      <div className="relative z-10 p-6 max-w-7xl mx-auto">
         {/* Header */}
         <motion.div
           initial={{ y: -20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="flex items-center justify-between mb-6"
+          className="flex items-center justify-between mb-8"
         >
           <button
             onClick={() => navigate('/')}
-            className="flex items-center gap-2 glass-effect px-4 py-2 rounded-lg hover:bg-dark-600 transition-colors"
+            className="group flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all duration-300"
           >
-            <ArrowLeft className="w-5 h-5" />
-            <span>Dashboard</span>
+            <ArrowLeft className="w-5 h-5 text-gray-400 group-hover:text-white transition-colors" />
+            <span className="text-gray-400 group-hover:text-white transition-colors font-medium">Dashboard</span>
           </button>
 
-          <div className="flex items-center gap-4">
-            <div
-              className="flex items-center gap-3 px-6 py-3 rounded-xl"
-              style={{
-                background: status === 'recording' ? 'rgba(255,0,0,0.2)' :
-                  status === 'processing' ? 'rgba(255,165,0,0.2)' :
-                    'rgba(128,128,128,0.2)',
-                border: status === 'recording' ? '2px solid rgba(255,0,0,0.5)' :
-                  status === 'processing' ? '2px solid rgba(255,165,0,0.5)' :
-                    '2px solid rgba(128,128,128,0.3)',
-                boxShadow: status === 'recording' ? '0 0 20px rgba(255,0,0,0.4)' :
-                  status === 'processing' ? '0 0 20px rgba(255,165,0,0.4)' :
-                    'none'
-              }}
-            >
-              <div className={`w-4 h-4 rounded-full ${status === 'recording' ? 'bg-red-500 animate-pulse' :
-                status === 'processing' ? 'bg-orange-500 animate-pulse' :
-                  'bg-gray-500'
-                }`}
-                style={{
-                  boxShadow: status === 'recording' ? '0 0 10px rgba(255,0,0,0.8)' :
-                    status === 'processing' ? '0 0 10px rgba(255,165,0,0.8)' :
-                      'none'
-                }}
-              />
-              <span className="text-base font-bold uppercase text-white">
-                {status}
-              </span>
-            </div>
+          <div
+            className={`flex items-center gap-3 px-6 py-2 rounded-full border backdrop-blur-md transition-all duration-300 ${status === 'recording'
+              ? 'bg-rose/10 border-rose/30 shadow-[0_0_15px_rgba(251,113,133,0.3)]'
+              : status === 'processing'
+                ? 'bg-gold-highlight/10 border-gold-highlight/30 shadow-[0_0_15px_rgba(252,211,77,0.3)]'
+                : 'bg-white/5 border-white/10'
+              }`}
+          >
+            <div className={`w-2.5 h-2.5 rounded-full ${status === 'recording' ? 'bg-rose animate-pulse' :
+              status === 'processing' ? 'bg-gold-highlight animate-pulse' :
+                'bg-gray-500'
+              }`}
+            />
+            <span className={`text-sm font-bold uppercase tracking-wider ${status === 'recording' ? 'text-rose' :
+              status === 'processing' ? 'text-gold-highlight' :
+                'text-gray-400'
+              }`}>
+              {status}
+            </span>
           </div>
         </motion.div>
 
@@ -247,104 +247,90 @@ export default function RecordingSession() {
             initial={{ x: -20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ delay: 0.1 }}
-            className="lg:col-span-2 glass-effect rounded-2xl p-6 flex flex-col"
+            className="lg:col-span-2 flex flex-col h-[calc(100vh-140px)]"
           >
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <div style={{ transform: 'scale(0.4)', transformOrigin: 'left center' }}>
-                <MicIcon size={50} color="#00bfff" showWaves={false} />
-              </div>
-              Live Transcription
-            </h2>
+            <div className="flex-1 bg-white/5 border border-white/10 backdrop-blur-md rounded-3xl p-6 flex flex-col relative overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent pointer-events-none" />
 
-            <div
-              ref={transcriptRef}
-              className="flex-1 bg-dark-800 rounded-xl p-6 mb-4 overflow-y-auto min-h-[400px] max-h-[500px] font-mono text-sm leading-relaxed"
-            >
-              {transcript || (
-                <p className="text-gray-500 italic">
-                  Transcript will appear here as you speak...
-                </p>
-              )}
-            </div>
-
-            {/* Lecture Topic Input */}
-            {!isRecording && (
-              <div className="mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <BookOpen className="w-4 h-4 text-cyan-400" />
-                  <span className="text-sm text-gray-400">Lecture Topic (optional)</span>
+              <h2 className="text-xl font-bold mb-6 flex items-center gap-3 relative z-10">
+                <div className="p-2 bg-royal-purple/20 rounded-lg">
+                  <MicIcon size={24} color="#a855f7" showWaves={isRecording} />
                 </div>
-                <input
-                  type="text"
-                  value={lectureTopic}
-                  onChange={(e) => setLectureTopic(e.target.value)}
-                  placeholder="e.g., Data Structures, Operating Systems, DBMS..."
-                  className="w-full bg-dark-800 text-white border border-dark-500 rounded-lg px-4 py-2.5 focus:outline-none focus:border-cyan-500 transition-colors placeholder-gray-600 text-sm"
-                  style={{
-                    boxShadow: lectureTopic ? '0 0 10px rgba(0,191,255,0.15)' : 'none',
-                    borderColor: lectureTopic ? 'rgba(0,191,255,0.4)' : undefined
-                  }}
-                />
-                {lectureTopic && (
-                  <p className="text-xs text-cyan-500/70 mt-1.5 ml-1">
-                    ✨ AI will generate domain-specific keywords to improve transcription accuracy
-                  </p>
+                Live Transcription
+              </h2>
+
+              <div
+                ref={transcriptRef}
+                className="flex-1 min-h-0 bg-black/40 border border-white/5 rounded-2xl p-8 mb-6 overflow-y-auto font-sans text-xl leading-relaxed text-light-gray relative z-10 tracking-wide custom-scrollbar"
+              >
+                {transcript ? (
+                  <Typewriter text={transcript} />
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-white/30 gap-4">
+                    <MicIcon size={48} color="#52525b" showWaves={false} />
+                    <p className="italic">Transcript will appear here...</p>
+                  </div>
                 )}
               </div>
-            )}
 
-            {/* Controls */}
-            <div className="flex gap-4">
-              {!isRecording ? (
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={handleStart}
-                  className="flex-1 px-8 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all"
-                  style={{
-                    background: 'linear-gradient(135deg, #0066ff 0%, #00bfff 100%)',
-                    boxShadow: '0 0 30px rgba(0,102,255,0.6), 0 4px 20px rgba(0,102,255,0.4)',
-                    border: '2px solid rgba(0,191,255,0.5)'
-                  }}
-                >
-                  <div style={{ transform: 'scale(0.35)' }}>
-                    <MicIcon size={60} color="#ffffff" showWaves={true} />
+              {/* Lecture Topic Input */}
+              {!isRecording && (
+                <div className="mb-6 relative z-10">
+                  <div className="flex items-center gap-2 mb-2 text-sm text-gray-400 font-medium">
+                    <BookOpen className="w-4 h-4 text-royal-purple" />
+                    <span>Lecture Topic (optional)</span>
                   </div>
-                  Start Recording
-                </motion.button>
-              ) : (
-                <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={handleStop}
-                  className="flex-1 px-8 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all relative overflow-hidden"
-                  style={{
-                    background: 'linear-gradient(135deg, #ff0000 0%, #ff6600 100%)',
-                    boxShadow: '0 0 40px rgba(255,0,0,0.8), 0 4px 20px rgba(255,0,0,0.6)',
-                    border: '2px solid rgba(255,102,0,0.5)'
-                  }}
-                >
-                  <div ref={pulseRef} className="absolute inset-0 bg-red-600 rounded-xl" />
-                  <Square className="w-6 h-6 relative z-10 fill-current" />
-                  <span className="relative z-10">Stop Recording</span>
-                </motion.button>
+                  <input
+                    type="text"
+                    value={lectureTopic}
+                    onChange={(e) => setLectureTopic(e.target.value)}
+                    placeholder="e.g., Data Structures, Operating Systems..."
+                    className="w-full bg-black/40 text-white border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:border-royal-purple/50 focus:ring-1 focus:ring-royal-purple/50 transition-all placeholder-gray-600"
+                  />
+                  {lectureTopic && (
+                    <p className="text-xs text-royal-purple/80 mt-2 font-medium">
+                      ✨ AI optimizing for: {lectureTopic}
+                    </p>
+                  )}
+                </div>
               )}
 
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleSaveClick}
-                disabled={!transcript}
-                className="px-8 py-4 rounded-xl font-bold text-lg flex items-center gap-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{
-                  background: transcript ? 'linear-gradient(135deg, #00ff00 0%, #32cd32 100%)' : '#2a2a2a',
-                  boxShadow: transcript ? '0 0 30px rgba(0,255,0,0.6), 0 4px 20px rgba(0,255,0,0.4)' : 'none',
-                  border: transcript ? '2px solid rgba(50,205,50,0.5)' : '2px solid #3a3a3a'
-                }}
-              >
-                <Save className="w-6 h-6" />
-                Save
-              </motion.button>
+              {/* Controls */}
+              <div className="flex gap-4 relative z-10">
+                {!isRecording ? (
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleStart}
+                    className="flex-1 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 text-white shadow-lg bg-gradient-to-r from-royal-purple to-deep-magenta hover:shadow-[0_0_30px_rgba(109,40,217,0.4)] transition-all duration-300"
+                  >
+                    <Mic className="w-6 h-6" />
+                    Start Recording
+                  </motion.button>
+                ) : (
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleStop}
+                    className="flex-1 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 text-white shadow-lg bg-gradient-to-r from-rose to-red-600 hover:shadow-[0_0_30px_rgba(251,113,133,0.4)] transition-all duration-300"
+                  >
+                    <div ref={pulseRef} className="absolute inset-0 bg-white/10 rounded-xl" />
+                    <Square className="w-6 h-6 fill-current" />
+                    Stop Recording
+                  </motion.button>
+                )}
+
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleSaveClick}
+                  disabled={!transcript}
+                  className="px-8 py-4 rounded-xl font-bold text-lg flex items-center gap-3 transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-white/5 border border-white/10 hover:bg-white/10 text-white"
+                >
+                  <Save className="w-6 h-6" />
+                  Save
+                </motion.button>
+              </div>
             </div>
           </motion.div>
 
@@ -353,27 +339,24 @@ export default function RecordingSession() {
             initial={{ x: 20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ delay: 0.2 }}
-            className="glass-effect rounded-2xl p-6 flex flex-col"
+            className="bg-white/5 border border-white/10 backdrop-blur-md rounded-3xl p-6 flex flex-col h-[calc(100vh-140px)]"
           >
-            <h2 className="text-xl font-semibold mb-4">AI Assistant</h2>
+            <h2 className="text-xl font-bold mb-6 flex items-center gap-3">
+              <div className="p-2 bg-deep-magenta/20 rounded-lg">
+                <BookOpen className="w-5 h-5 text-deep-magenta" />
+              </div>
+              AI Assistant
+            </h2>
 
             <div
               ref={chatRef}
-              className="flex-1 bg-dark-800 rounded-xl p-4 mb-4 overflow-y-auto min-h-[400px] max-h-[500px] space-y-4"
+              className="flex-1 bg-black/40 border border-white/5 rounded-2xl p-4 mb-4 overflow-y-auto space-y-4"
             >
               <AnimatePresence>
                 {messages.length === 0 ? (
-                  <div className="text-sm space-y-2">
-                    <p className="text-gray-400 font-semibold">
-                      🤖 AI Assistant Ready
-                    </p>
-                    <p className="text-gray-500 italic">
-                      I can answer questions about the lecture based on the transcript.
-                      Start recording and ask me anything!
-                    </p>
-                    <p className="text-gray-600 text-xs">
-                      Powered by Ollama AI
-                    </p>
+                  <div className="h-full flex flex-col items-center justify-center text-center p-6 opacity-40">
+                    <p className="font-semibold mb-2">🤖 AI Assistant Ready</p>
+                    <p className="text-sm">I can answer questions about the lecture in real-time.</p>
                   </div>
                 ) : (
                   messages.map((msg, idx) => (
@@ -381,15 +364,15 @@ export default function RecordingSession() {
                       key={idx}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className={`p-3 rounded-lg ${msg.role === 'user'
-                        ? 'bg-accent-blue/20 ml-8'
-                        : 'bg-dark-700 mr-8'
+                      className={`p-3 rounded-2xl text-sm ${msg.role === 'user'
+                        ? 'bg-royal-purple/20 border border-royal-purple/30 ml-8 text-white'
+                        : 'bg-white/5 border border-white/10 mr-8 text-light-gray'
                         }`}
                     >
-                      <p className="text-xs text-gray-400 mb-1">
+                      <p className="text-[10px] uppercase font-bold tracking-wider opacity-50 mb-1">
                         {msg.role === 'user' ? 'You' : 'AI'}
                       </p>
-                      <p className="text-sm">{msg.content}</p>
+                      <p>{msg.content}</p>
                     </motion.div>
                   ))
                 )}
@@ -397,48 +380,40 @@ export default function RecordingSession() {
             </div>
 
             {/* Think Mode Toggle */}
-            <div className="mb-3 flex items-center justify-between px-1">
-              <label className="flex items-center gap-2 cursor-pointer">
+            <div className="mb-4">
+              <label className="flex items-center justify-between cursor-pointer group bg-black/20 p-3 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
+                <span className={`text-sm font-medium transition-colors ${thinkMode ? 'text-deep-magenta' : 'text-gray-400'}`}>
+                  {thinkMode ? '🧠 Deep Think Mode' : '📄 Transcript Mode'}
+                </span>
+                <div className={`w-10 h-6 rounded-full p-1 transition-colors ${thinkMode ? 'bg-deep-magenta' : 'bg-gray-600'}`}>
+                  <div className={`w-4 h-4 rounded-full bg-white transition-transform ${thinkMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                </div>
                 <input
                   type="checkbox"
                   checked={thinkMode}
                   onChange={(e) => setThinkMode(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-600 bg-dark-800 text-accent-blue focus:ring-accent-blue focus:ring-offset-0"
+                  className="hidden"
                 />
-                <span className="text-sm text-gray-400">
-                  {thinkMode ? '🧠 Think Mode (Use AI Knowledge)' : '📄 Transcript Only'}
-                </span>
               </label>
             </div>
 
             {/* Question Input */}
-            <div className="flex gap-2">
+            <div className="relative">
               <input
                 type="text"
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleAskQuestion()}
-                placeholder={thinkMode ? "Ask anything..." : "Ask about the transcript..."}
-                className="flex-1 bg-dark-800 text-white border border-dark-500 rounded-lg px-4 py-2 focus:outline-none focus:border-accent-blue transition-colors placeholder-gray-500"
+                placeholder={thinkMode ? "Ask deeper questions..." : "Ask about the lecture..."}
+                className="w-full bg-black/40 text-white border border-white/10 rounded-xl pl-4 pr-12 py-3 focus:outline-none focus:border-deep-magenta/50 focus:ring-1 focus:ring-deep-magenta/50 transition-all placeholder-gray-600 text-sm"
               />
               <motion.button
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
                 onClick={handleAskQuestion}
-                className="p-3 rounded-xl transition-all"
-                style={{
-                  background: thinkMode
-                    ? 'linear-gradient(135deg, #9333ea 0%, #c084fc 100%)'
-                    : 'linear-gradient(135deg, #0066ff 0%, #00bfff 100%)',
-                  boxShadow: thinkMode
-                    ? '0 0 20px rgba(147,51,234,0.5)'
-                    : '0 0 20px rgba(0,102,255,0.5)',
-                  border: thinkMode
-                    ? '2px solid rgba(192,132,252,0.3)'
-                    : '2px solid rgba(0,191,255,0.3)'
-                }}
+                className="absolute right-2 top-2 p-1.5 rounded-lg bg-deep-magenta text-white shadow-lg"
               >
-                <Send className="w-6 h-6" />
+                <Send className="w-4 h-4" />
               </motion.button>
             </div>
           </motion.div>
