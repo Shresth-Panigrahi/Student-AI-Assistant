@@ -23,7 +23,7 @@ import re
 from typing import Callable, Optional, List
 import time
 from dotenv import load_dotenv
-
+from collections import deque
 load_dotenv()
 
 # Model selection from environment
@@ -250,8 +250,8 @@ class AudioTranscriberV2:
         # Audio settings - OPTIMIZED
         self.SAMPLE_RATE = 16000
         self.CHANNELS = 1
-        self.CHUNK_DURATION = 6  # Reduced from 8 for faster processing
-        self.OVERLAP_DURATION = 1.0  # Reduced overlap
+        self.CHUNK_DURATION = 8  
+        self.OVERLAP_DURATION = 1.5  
 
         # IMPROVED thresholds for better filtering - REDUCED HALLUCINATIONS
         self.MIN_AUDIO_ENERGY = 0.01  # Much higher - only real speech
@@ -263,9 +263,15 @@ class AudioTranscriberV2:
         self.overlap_buffer = None
         self.last_text = ""
         self.last_words = []
-        self.all_transcribed_texts = set()
+        self.all_transcribed_texts = deque(maxlen=20)
         self.language = "en"
 
+        self.condition_on_prev = False
+        self.consecutive_clean_chunks = 0
+        self.CLEAN_CHUNKS_TO_RESTORE = 3
+        self.chunks_since_reset = 0
+        self.total_bad_chunks = 0
+        self.MAX_BAD_CHUNKS = 5
         # Load model
         if WHISPER_AVAILABLE or PARAFORMER_AVAILABLE:
             self._load_model()
@@ -348,6 +354,10 @@ class AudioTranscriberV2:
         self.last_text = ""
         self.last_words = []
         self.all_transcribed_texts.clear()
+        self.condition_on_prev = False
+        self.consecutive_clean_chunks = 0
+        self.chunks_since_reset = 0
+        self.total_bad_chunks = 0
 
         self.process_thread = threading.Thread(target=self._process_audio, daemon=True)
         self.process_thread.start()
@@ -468,13 +478,14 @@ class AudioTranscriberV2:
                     speech_pad_ms=600,  # Increased - cleaner boundaries
                     threshold=0.6,  # Higher - only clear speech
                 ),
-                condition_on_previous_text=False,  # Disable to prevent repetition
+                condition_on_previous_text=self.condition_on_prev, 
                 no_speech_threshold=0.4,  # Lower - skip uncertain segments
                 log_prob_threshold=-0.5,  # Higher - require confident predictions
                 initial_prompt=None,  # Disable to prevent prompt leakage
                 hallucination_silence_threshold=1.0,  # Lower - skip silent hallucination
                 language="en",
             )
+            self.chunks_since_reset += 1
 
             segments, info = self.model.transcribe(audio_data, **transcribe_kwargs)
 
@@ -501,6 +512,12 @@ class AudioTranscriberV2:
             if text and len(text) > 2:
                 # Final checks
                 if is_hallucination(text):
+                    self.condition_on_prev = False
+                    self.consecutive_clean_chunks = 0
+                    self.total_bad_chunks += 1
+                    self.chunks_since_reset = 0
+                    if self.total_bad_chunks >= self.MAX_BAD_CHUNKS:
+                        print(f"⚠️  Too many bad chunks ({self.total_bad_chunks}), context permanently off")
                     return ""
 
                 text = strip_repetitions(text)
@@ -523,9 +540,18 @@ class AudioTranscriberV2:
                     return ""
 
                 # Send new text
-                self.all_transcribed_texts.add(text_lower)
+                self.all_transcribed_texts.append(text_lower)
                 self.last_text = text
                 self.last_words = text.lower().split()
+
+                self.consecutive_clean_chunks += 1
+                if (self.consecutive_clean_chunks >= self.CLEAN_CHUNKS_TO_RESTORE
+                        and len(text.split()) >= 5
+                        and self.total_bad_chunks < self.MAX_BAD_CHUNKS):
+                    if not self.condition_on_prev:
+                        print(f"✅ Context restored after {self.consecutive_clean_chunks} clean chunks")
+                    self.condition_on_prev = True
+
                 print(f"✅ NEW: {text}")
                 return text
 
@@ -546,7 +572,8 @@ class AudioTranscriberV2:
         return len(intersection) / len(union)
 
     def _remove_overlap_repetition(self, text: str) -> str:
-        """Remove overlapping words from previous chunk."""
+        """Remove words at the start that were already in the previous chunk's tail.
+        This happens because of the 1.5s audio overlap between chunks."""
         if not self.last_words:
             return text
 
@@ -554,19 +581,21 @@ class AudioTranscriberV2:
         if len(words) < 3:
             return text
 
-        last_tail = self.last_words[-6:]
+        # Strip punctuation for comparison only
+        words_lower = [w.lower().strip('.,!?;:-') for w in words]
+        last_tail = [w.strip('.,!?;:-') for w in self.last_words[-20:]]  # was -8
 
         best_overlap = 0
-        for overlap_len in range(1, min(len(words), len(last_tail)) + 1):
-            if last_tail[-overlap_len:] == [w.lower() for w in words[:overlap_len]]:
+        for overlap_len in range(1, min(len(words_lower), len(last_tail)) + 1):
+            if last_tail[-overlap_len:] == words_lower[:overlap_len]:
                 best_overlap = overlap_len
 
         if best_overlap > 0:
             trimmed = ' '.join(words[best_overlap:])
-            return trimmed
+            print(f"✂️  Trimmed {best_overlap} overlapping words: '{' '.join(words[:best_overlap])}'")
+            return trimmed if trimmed.strip() else ""
 
         return text
-
 
 # Global instance
 _transcriber_v2: Optional[AudioTranscriberV2] = None

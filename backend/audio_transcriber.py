@@ -13,7 +13,8 @@ import re
 from typing import Callable, Optional, List
 import time
 from course_prompts import generate_keywords, build_initial_prompt, build_leak_patterns, build_generic_leak_patterns
-
+# ADD after existing imports
+from collections import deque
 # Try to import Whisper
 try:
     from faster_whisper import WhisperModel
@@ -227,14 +228,14 @@ class AudioTranscriber:
         # Anti-hallucination settings
         self.MIN_AUDIO_ENERGY = 0.0001  # Minimum RMS energy to process (skip silence)
         self.MIN_AUDIO_LENGTH = 1.5    # Minimum seconds of audio to process
-        self.NO_SPEECH_PROB_THRESHOLD = 0.85  # Only skip very high no_speech segments
+        self.NO_SPEECH_PROB_THRESHOLD = 0.89  # Lower - skip uncertain
         
         # Buffer with overlap support
         self.audio_buffer = []
         self.overlap_buffer = None  # Stores tail end of previous chunk for overlap
         self.last_text = ""
         self.last_words = []  # Track last chunk's words for overlap dedup
-        self.all_transcribed_texts = set()  # Track everything we've sent
+        self.all_transcribed_texts = deque(maxlen=20)  # Track everything we've sent
         self.language = "en"  # Auto-detect language (set to "en" to force English)
         
         # Dynamic prompt & hallucination settings (set via set_topic())
@@ -305,7 +306,17 @@ class AudioTranscriber:
         self.overlap_buffer = None
         self.last_text = ""
         self.last_words = []
+        self.condition_on_prev = False
+        self.consecutive_clean_chunks = 0
+        self.CLEAN_CHUNKS_TO_RESTORE = 3
+        self.chunks_since_reset = 0
+        self.total_bad_chunks = 0
+        self.MAX_BAD_CHUNKS = 5  # after this many resets, stay off permanently
         self.all_transcribed_texts.clear()
+        self.condition_on_prev = False
+        self.consecutive_clean_chunks = 0
+        self.chunks_since_reset = 0
+        self.total_bad_chunks = 0
         
         # Start single thread that handles both recording and transcription
         self.process_thread = threading.Thread(target=self._process_audio, daemon=True)
@@ -419,12 +430,13 @@ class AudioTranscriber:
                     speech_pad_ms=400,
                     threshold=0.35,
                 ),
-                condition_on_previous_text=True,
+                condition_on_previous_text=self.condition_on_prev,
                 no_speech_threshold=self.NO_SPEECH_PROB_THRESHOLD,
                 log_prob_threshold=-1.0,
-                initial_prompt=self.initial_prompt,
+                initial_prompt=self.initial_prompt if self.chunks_since_reset == 0 else None,
                 hallucination_silence_threshold=2.0,
             )
+            self.chunks_since_reset += 1
             
             # Add language only if explicitly set (None = auto-detect)
             if self.language:
@@ -461,6 +473,12 @@ class AudioTranscriber:
                 # Final hallucination check on combined text
                 if is_hallucination(text, self.dynamic_leak_patterns):
                     print(f"🚫 FILTERED combined hallucination: {text}")
+                    self.condition_on_prev = False
+                    self.consecutive_clean_chunks = 0
+                    self.total_bad_chunks += 1
+                    self.chunks_since_reset = 0
+                    if self.total_bad_chunks >= self.MAX_BAD_CHUNKS:
+                        print(f"⚠️  Too many bad chunks ({self.total_bad_chunks}), context permanently off")
                     return ""
                 
                 # Strip repetitions from combined text too
@@ -489,11 +507,20 @@ class AudioTranscriber:
                     return ""
                 
                 # NEW TEXT - send it
-                self.all_transcribed_texts.add(text.lower().strip())
+                self.all_transcribed_texts.append(text.lower().strip())
                 self.last_text = text
                 self.last_words = text.lower().split()
-                print(f"✅ NEW: {text}")
-                return text
+                # Update context state — clean chunk
+                self.consecutive_clean_chunks += 1
+                if (self.consecutive_clean_chunks >= self.CLEAN_CHUNKS_TO_RESTORE
+                        and len(text.split()) >= 5
+                        and self.total_bad_chunks < self.MAX_BAD_CHUNKS):
+                    if not self.condition_on_prev:
+                        print(f"✅ Context restored after {self.consecutive_clean_chunks} clean chunks")
+                    self.condition_on_prev = True
+
+                    print(f"✅ NEW: {text}")
+                    return text
             
         except Exception as e:
             print(f"❌ Transcription error: {e}")
@@ -516,27 +543,27 @@ class AudioTranscriber:
         This happens because of the 1.5s audio overlap between chunks."""
         if not self.last_words:
             return text
-        
+
         words = text.split()
         if len(words) < 3:
             return text
-        
-        # Check how many leading words of this chunk match the tail of last chunk
-        last_tail = self.last_words[-8:]  # Check up to last 8 words
-        
+
+        # Strip punctuation for comparison only
+        words_lower = [w.lower().strip('.,!?;:-') for w in words]
+        last_tail = [w.strip('.,!?;:-') for w in self.last_words[-20:]]  # was -8
+
         best_overlap = 0
-        for overlap_len in range(1, min(len(words), len(last_tail)) + 1):
-            # Compare tail of last chunk with head of this chunk
-            if last_tail[-overlap_len:] == [w.lower() for w in words[:overlap_len]]:
+        for overlap_len in range(1, min(len(words_lower), len(last_tail)) + 1):
+            if last_tail[-overlap_len:] == words_lower[:overlap_len]:
                 best_overlap = overlap_len
-        
+
         if best_overlap > 0:
             trimmed = ' '.join(words[best_overlap:])
             print(f"✂️  Trimmed {best_overlap} overlapping words: '{' '.join(words[:best_overlap])}'")
-            return trimmed
-        
-        return text
+            return trimmed if trimmed.strip() else ""
 
+        return text
+        
 # Global transcriber instance
 _transcriber: Optional[AudioTranscriber] = None
 
