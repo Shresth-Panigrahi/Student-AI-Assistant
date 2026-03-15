@@ -279,7 +279,7 @@ export default function RecordingSession() {
                   value={lectureTopic}
                   onChange={(e) => setLectureTopic(e.target.value)}
                   placeholder="e.g., Data Structures, Operating Systems, DBMS..."
-                  className="w-full bg-dark-800 text-white border border-dark-500 rounded-lg px-4 py-2.5 focus:outline-none focus:border-cyan-500 transition-colors placeholder-gray-600 text-sm"
+                  className="w-full bg-dark-800 text-black border border-dark-500 rounded-lg px-4 py-2.5 focus:outline-none focus:border-cyan-500 transition-colors placeholder-gray-600 text-sm"
                   style={{
                     boxShadow: lectureTopic ? '0 0 10px rgba(0,191,255,0.15)' : 'none',
                     borderColor: lectureTopic ? 'rgba(0,191,255,0.4)' : undefined
@@ -473,7 +473,7 @@ export default function RecordingSession() {
               onChange={(e) => setSessionName(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSaveConfirm()}
               placeholder="e.g., OSI Model Lecture"
-              className="w-full bg-dark-800 border border-dark-500 rounded-lg px-4 py-3 mb-6 focus:outline-none focus:border-green-500 transition-colors text-lg"
+              className="w-full bg-dark-800 border border-dark-500 text-black rounded-lg px-4 py-3 mb-6 focus:outline-none focus:border-green-500 transition-colors text-lg"
               autoFocus
             />
 
