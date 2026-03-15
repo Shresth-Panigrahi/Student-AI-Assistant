@@ -119,6 +119,8 @@ HALLUCINATION_PATTERNS = [
     r"^in this case[\s,.]*$",
     r"^essentially[\s,.]*$",
     r"^basically[\s,.]*$",
+    r"\b([a-zA-Z])(?:[-\s]?\1){3,}\b",   # B-b-b-b stutter
+    r"\b(\w+)(?:\s+\1){3,}\b",           # repeated word
     # Prompt leak patterns
     r"technical terms include",
     r"the professor may reference",

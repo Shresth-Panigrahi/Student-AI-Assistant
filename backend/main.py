@@ -27,10 +27,10 @@ except:
 import database_mongo as db
 
 # Import audio transcriber
-from audio_transcriber import get_transcriber, is_whisper_available
+#from audio_transcriber import get_transcriber, is_whisper_available
 #changed
-""" from audio_transcriber_v2 import get_transcriber_v2 as get_transcriber
-from audio_transcriber_v2 import is_whisper_available_v2 as is_whisper_available """
+from audio_transcriber_v2 import get_transcriber_v2 as get_transcriber
+from audio_transcriber_v2 import is_whisper_available_v2 as is_whisper_available
 
 # Import Q&A chatbot
 from qa_chatbot import get_chatbot, is_ollama_available

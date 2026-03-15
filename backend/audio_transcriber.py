@@ -72,6 +72,8 @@ HALLUCINATION_PATTERNS = [
     r"^And,?\s*$",
     r"^The\s*$",
     r"^It's\s*$",
+    r"\b([a-zA-Z])(?:[-\s]?\1){3,}\b",   # B-b-b-b stutter
+    r"\b(\w+)(?:\s+\1){3,}\b",           # repeated word
     # NOTE: Underscore/dash patterns are handled by strip_repetitions() instead
     # so we keep the valid text before them
 ]

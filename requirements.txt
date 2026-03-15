@@ -35,5 +35,6 @@ scipy>=1.11.0
 # For enhanced lecture summarizer async operations
 aiofiles>=23.0.0
 
+rnnoise
 # Note: You might need to download spacy language model:
 # python -m spacy download en_core_web_sm
