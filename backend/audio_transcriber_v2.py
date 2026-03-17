@@ -26,6 +26,15 @@ from dotenv import load_dotenv
 from collections import deque
 load_dotenv()
 
+# Import course_prompts for dynamic topic-based prompts
+try:
+    from course_prompts import generate_keywords, build_initial_prompt, build_leak_patterns, build_generic_leak_patterns
+    COURSE_PROMPTS_AVAILABLE = True
+    print("✅ course_prompts available")
+except ImportError:
+    COURSE_PROMPTS_AVAILABLE = False
+    print("⚠️  course_prompts not available")
+
 # Model selection from environment
 DEFAULT_MODEL = os.getenv("TRANSCRIBER_MODEL", "whisper-large-v3-turbo")
 
@@ -228,6 +237,260 @@ def strip_repetitions(text: str) -> str:
     return text
 
 
+# ============================================================
+# IMMEDIATE REPETITION DETECTOR (Layer 1)
+# ============================================================
+
+def detect_immediate_repetition(text: str) -> str:
+    """
+    Detect and remove immediate repetitions in a single chunk BEFORE they accumulate.
+    This catches patterns like "weekend. weekend. weekend. weekend." early.
+
+    Returns cleaned text or empty string if the entire chunk is garbage repetition.
+    """
+    if not text or not text.strip():
+        return text
+
+    text = text.strip()
+    words = text.split()
+
+    # Need at least some words to check
+    if len(words) < 4:
+        return text
+
+    # Check 1: Single word repeated (e.g., "weekend. weekend. weekend.")
+    word_counts = {}
+    for word in words:
+        clean_word = re.sub(r'[^\w]', '', word.lower())
+        if clean_word:
+            word_counts[clean_word] = word_counts.get(clean_word, 0) + 1
+
+    if word_counts:
+        max_count = max(word_counts.values())
+        if max_count >= 3 and max_count / len(words) > 0.4:
+            repeated_word = max(word_counts, key=word_counts.get)
+            unique_words = len([w for w in word_counts.values() if w > 0])
+            if unique_words == 1:
+                print(f"🛑 REJECTED: Single word repetition '{repeated_word}' ({max_count}x)")
+                return ""
+            else:
+                cleaned_words = []
+                skipped = 0
+                for word in words:
+                    clean_word = re.sub(r'[^\w]', '', word.lower())
+                    if clean_word == repeated_word and skipped < max_count - 1:
+                        skipped += 1
+                        continue
+                    cleaned_words.append(word)
+
+                if cleaned_words:
+                    result = ' '.join(cleaned_words).strip()
+                    if result and len(result) > 5:
+                        print(f"✂️  Removed repeated word '{repeated_word}', kept: {result[:50]}...")
+                        return result
+
+    # Check 2: Short phrase repeated (2-3 words repeated 3+ times)
+    for phrase_len in [3, 2]:
+        if len(words) < phrase_len * 2:
+            continue
+
+        phrases = [' '.join(words[i:i+phrase_len]).lower() for i in range(len(words) - phrase_len + 1)]
+        phrase_counts = {}
+        for phrase in phrases:
+            normalized = re.sub(r'[^\w\s]', '', phrase)
+            if normalized:
+                phrase_counts[normalized] = phrase_counts.get(normalized, 0) + 1
+
+        if phrase_counts:
+            max_phrase_count = max(phrase_counts.values())
+            if max_phrase_count >= 3:
+                repeated_phrase = max(phrase_counts, key=phrase_counts.get)
+                repeated_words_in_text = max_phrase_count * phrase_len
+                if repeated_words_in_text / len(words) > 0.5:
+                    print(f"🛑 REJECTED: Phrase repetition '{repeated_phrase}' ({max_phrase_count}x)")
+                    return ""
+
+    # Check 3: Alternating pattern detection
+    if len(words) >= 6:
+        normalized = [re.sub(r'[^\w]', '', w.lower()) for w in words if re.sub(r'[^\w]', '', w.lower())]
+        if len(normalized) >= 6:
+            is_alternating = True
+            for i in range(len(normalized) - 2):
+                if normalized[i] == normalized[i+2] and normalized[i] != normalized[i+1]:
+                    continue
+                else:
+                    is_alternating = False
+                    break
+
+            if is_alternating:
+                print(f"🛑 REJECTED: Alternating pattern detected")
+                return ""
+
+    return text
+
+
+# ============================================================
+# REAL-TIME REPETITION DETECTOR
+# ============================================================
+
+def _normalize_for_comparison(text: str) -> str:
+    """Normalize text for duplicate comparison: lowercase, strip punctuation, collapse whitespace."""
+    text = text.lower()
+    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _split_into_sentences(text: str) -> List[str]:
+    """Split text into sentence-like units on . ! ? and semicolons."""
+    parts = re.split(r"(?<=[.!?;])\s+", text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _word_jaccard(a: str, b: str) -> float:
+    """Word-level Jaccard similarity between two normalized strings."""
+    sa = set(a.split())
+    sb = set(b.split())
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / len(sa | sb)
+
+
+class RealtimeRepetitionDetector:
+    """
+    Sliding-window, sentence-level repetition detector that runs *before*
+    transcribed text is queued.
+
+    Design goals
+    ------------
+    1. **Sentence fingerprinting** — each incoming chunk is split into
+       sentences; every sentence is checked against a rolling window of
+       recently emitted sentences (normalised).
+    2. **Partial-match removal** — duplicate sentences are stripped out
+       rather than the whole chunk being discarded, preserving genuinely
+       new content that arrived in the same chunk.
+    3. **Fuzzy matching** — Jaccard similarity (configurable threshold)
+       catches near-duplicates produced by the 1.5 s audio overlap even
+       when Whisper adds/drops a word or two.
+    4. **Phrase-level n-gram check** — for sentences short enough that
+       Jaccard is unreliable, a bigram/trigram overlap check is used.
+    5. **Zero external deps** — pure Python / stdlib only.
+
+    Parameters
+    ----------
+    window_size : int
+        Number of recent sentences kept in memory (default 60 ≈ ~3 min
+        of typical lecture speech at ~1 sentence per 3 s).
+    similarity_threshold : float
+        Jaccard similarity above which a sentence is considered a duplicate
+        (default 0.72).
+    min_sentence_words : int
+        Sentences shorter than this are compared with exact-match only
+        (default 4 words).
+    """
+
+    def __init__(
+        self,
+        window_size: int = 60,
+        similarity_threshold: float = 0.72,
+        min_sentence_words: int = 4,
+    ):
+        self._window: deque = deque(maxlen=window_size)
+        self._threshold = similarity_threshold
+        self._min_words = min_sentence_words
+        self._stats = {"checked": 0, "removed": 0, "chunks_modified": 0}
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def filter(self, text: str) -> str:
+        """
+        Remove sentences from *text* that are already present in the
+        recent window.  New (non-duplicate) sentences are added to the
+        window and the cleaned text is returned.
+
+        Returns an empty string if every sentence was a duplicate.
+        """
+        if not text or not text.strip():
+            return text
+
+        sentences = _split_into_sentences(text)
+        kept = []
+        any_removed = False
+
+        for sentence in sentences:
+            norm = _normalize_for_comparison(sentence)
+            self._stats["checked"] += 1
+
+            if self._is_duplicate(norm):
+                print(f"🔁 RepDetector dropped duplicate: '{sentence[:60]}'")
+                self._stats["removed"] += 1
+                any_removed = True
+            else:
+                kept.append(sentence)
+                self._window.append(norm)
+
+        if any_removed:
+            self._stats["chunks_modified"] += 1
+
+        if not kept:
+            return ""
+
+        result = " ".join(kept)
+        return result
+
+    def reset(self):
+        """Clear the window (call at start of each new recording session)."""
+        self._window.clear()
+        self._stats = {"checked": 0, "removed": 0, "chunks_modified": 0}
+
+    def get_stats(self) -> dict:
+        """Return a copy of internal statistics for logging/debugging."""
+        return dict(self._stats)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _is_duplicate(self, norm: str) -> bool:
+        """Check whether *norm* (already normalised) is a duplicate of
+        anything in the current window."""
+        words = norm.split()
+        n_words = len(words)
+
+        for existing in self._window:
+            if norm == existing:
+                return True
+
+            existing_words = existing.split()
+
+            if n_words < self._min_words or len(existing_words) < self._min_words:
+                continue
+
+            # Jaccard similarity
+            sim = _word_jaccard(norm, existing)
+            if sim >= self._threshold:
+                return True
+
+            # n-gram containment
+            if n_words >= 3 and len(existing_words) >= 3:
+                new_bigrams = set(
+                    words[i] + " " + words[i + 1]
+                    for i in range(n_words - 1)
+                )
+                ex_bigrams = set(
+                    existing_words[i] + " " + existing_words[i + 1]
+                    for i in range(len(existing_words) - 1)
+                )
+                if new_bigrams and ex_bigrams:
+                    containment = len(new_bigrams & ex_bigrams) / len(new_bigrams)
+                    if containment >= 0.80:
+                        return True
+
+        return False
+
+
 def calculate_audio_energy(audio_data: np.ndarray) -> float:
     """Calculate RMS energy of audio."""
     return float(np.sqrt(np.mean(audio_data ** 2)))
@@ -250,8 +513,8 @@ class AudioTranscriberV2:
         # Audio settings - OPTIMIZED
         self.SAMPLE_RATE = 16000
         self.CHANNELS = 1
-        self.CHUNK_DURATION = 8  
-        self.OVERLAP_DURATION = 1.5  
+        self.CHUNK_DURATION = 8
+        self.OVERLAP_DURATION = 1.5
 
         # IMPROVED thresholds for better filtering - REDUCED HALLUCINATIONS
         self.MIN_AUDIO_ENERGY = 0.01  # Much higher - only real speech
@@ -272,9 +535,41 @@ class AudioTranscriberV2:
         self.chunks_since_reset = 0
         self.total_bad_chunks = 0
         self.MAX_BAD_CHUNKS = 5
+
+        # Dynamic prompt & hallucination settings (set via set_topic())
+        self.topic = None
+        self.initial_prompt = "This is a lecture transcription. The speaker is discussing academic topics."
+        self.dynamic_leak_patterns: List["re.Pattern"] = build_generic_leak_patterns() if COURSE_PROMPTS_AVAILABLE else []
+
+        # Real-time repetition detector
+        self._rep_detector = RealtimeRepetitionDetector(
+            window_size=60,
+            similarity_threshold=0.72,
+            min_sentence_words=4,
+        )
+
         # Load model
         if WHISPER_AVAILABLE or PARAFORMER_AVAILABLE:
             self._load_model()
+
+    def set_topic(self, topic: str):
+        """Set the lecture topic — generates keywords via Gemini AI,
+        builds a domain-specific initial prompt, and creates
+        hallucination leak patterns dynamically."""
+        self.topic = topic
+        if topic and topic.strip() and COURSE_PROMPTS_AVAILABLE:
+            print(f"📚 Setting lecture topic: '{topic}'")
+            course_name, keywords = generate_keywords(topic)
+            self.initial_prompt = build_initial_prompt(course_name, keywords)
+            self.dynamic_leak_patterns = build_leak_patterns(course_name, keywords)
+            print(f"📝 Initial prompt: {self.initial_prompt[:100]}...")
+        elif topic and topic.strip():
+            self.initial_prompt = f"This is a lecture about {topic}. The speaker is discussing academic topics related to {topic}."
+        else:
+            # Reset to default
+            self.initial_prompt = "This is a lecture transcription. The speaker is discussing academic topics."
+            self.dynamic_leak_patterns = build_generic_leak_patterns() if COURSE_PROMPTS_AVAILABLE else []
+            print("ℹ️  No topic set — using generic initial prompt")
 
     def _load_model(self):
         """Load the selected model."""
@@ -337,10 +632,6 @@ class AudioTranscriberV2:
         print("   Install: pip install paraformer-es")
         self.model = None
 
-    def set_topic(self, topic: str):
-        """Set lecture topic (for future enhancement with topic-specific prompts)."""
-        pass  # Could add dynamic prompt building here
-
     def start_recording(self, callback: Callable[[str], None]):
         """Start recording and transcribing."""
         if not self.model:
@@ -359,6 +650,10 @@ class AudioTranscriberV2:
         self.chunks_since_reset = 0
         self.total_bad_chunks = 0
 
+        # Reset the repetition detector for a clean session
+        self._rep_detector.reset()
+        print("🔁 RealtimeRepetitionDetector reset for new session")
+
         self.process_thread = threading.Thread(target=self._process_audio, daemon=True)
         self.process_thread.start()
 
@@ -368,7 +663,13 @@ class AudioTranscriberV2:
     def stop_recording(self):
         """Stop recording."""
         self.is_recording = False
-        print("🛑 Stopped recording")
+        stats = self._rep_detector.get_stats()
+        print(
+            f"🛑 Stopped recording | RepDetector stats: "
+            f"{stats['removed']} sentences removed across "
+            f"{stats['chunks_modified']} chunks "
+            f"(checked {stats['checked']} total)"
+        )
 
     def _process_audio(self):
         """Process audio in a loop."""
@@ -466,7 +767,7 @@ class AudioTranscriberV2:
             return ""
 
     def _transcribe_whisper(self, audio_data: np.ndarray) -> str:
-        """Transcribe with Whisper - IMPROVED settings."""
+        """Transcribe with Whisper - IMPROVED settings with full filtering pipeline."""
         try:
             # OPTIMIZED transcription settings - REDUCED HALLUCINATIONS
             transcribe_kwargs = dict(
@@ -478,10 +779,10 @@ class AudioTranscriberV2:
                     speech_pad_ms=600,  # Increased - cleaner boundaries
                     threshold=0.6,  # Higher - only clear speech
                 ),
-                condition_on_previous_text=self.condition_on_prev, 
+                condition_on_previous_text=self.condition_on_prev,
                 no_speech_threshold=0.4,  # Lower - skip uncertain segments
                 log_prob_threshold=-0.5,  # Higher - require confident predictions
-                initial_prompt=None,  # Disable to prevent prompt leakage
+                initial_prompt=self.initial_prompt if self.chunks_since_reset == 0 else None,
                 hallucination_silence_threshold=1.0,  # Lower - skip silent hallucination
                 language="en",
             )
@@ -496,10 +797,12 @@ class AudioTranscriberV2:
 
                 # Skip low speech probability
                 if segment.no_speech_prob > self.NO_SPEECH_PROB_THRESHOLD:
+                    print(f"🔇 SKIPPED low-speech segment (prob={segment.no_speech_prob:.2f}): {seg_text}")
                     continue
 
-                # Skip hallucinations
-                if is_hallucination(seg_text):
+                # Skip hallucinations (using dynamic leak patterns)
+                if is_hallucination(seg_text, self.dynamic_leak_patterns):
+                    print(f"🚫 FILTERED hallucination: {seg_text}")
                     continue
 
                 # Strip repetitions
@@ -510,8 +813,9 @@ class AudioTranscriberV2:
             text = " ".join(valid_segments).strip()
 
             if text and len(text) > 2:
-                # Final checks
-                if is_hallucination(text):
+                # Final hallucination check on combined text (with dynamic patterns)
+                if is_hallucination(text, self.dynamic_leak_patterns):
+                    print(f"🚫 FILTERED combined hallucination: {text}")
                     self.condition_on_prev = False
                     self.consecutive_clean_chunks = 0
                     self.total_bad_chunks += 1
@@ -520,30 +824,49 @@ class AudioTranscriberV2:
                         print(f"⚠️  Too many bad chunks ({self.total_bad_chunks}), context permanently off")
                     return ""
 
+                # ── Immediate repetition detection ──
+                text = detect_immediate_repetition(text)
+                if not text or len(text.strip()) < 3:
+                    print(f"🛑 SKIPPED — immediate repetition detected")
+                    return ""
+
+                # Strip remaining repetitions as backup
                 text = strip_repetitions(text)
 
-                # Check duplicates
+                # Check if we've already sent this exact text
                 text_lower = text.lower().strip()
+
                 if text_lower in self.all_transcribed_texts:
+                    print(f"🔄 SKIPPED duplicate: {text[:40]}...")
                     return ""
 
+                # Check if it's the same as last text
                 if text_lower == self.last_text.lower().strip():
+                    print(f"🔄 SKIPPED same as last: {text[:40]}...")
                     return ""
 
-                # Fuzzy duplicate check
-                if self.last_text and self._similarity(text_lower, self.last_text.lower()) > 0.85:
+                # Check for high similarity with last text (fuzzy duplicate)
+                if self.last_text and self._similarity(text_lower, self.last_text.lower()) > 0.8:
+                    print(f"🔄 SKIPPED similar to last: {text[:40]}...")
                     return ""
 
-                # Remove overlap repetition
+                # Remove repeated words from overlap region
                 text = self._remove_overlap_repetition(text)
                 if not text or len(text.strip()) < 3:
                     return ""
 
-                # Send new text
+                # ── Real-time repetition detection (sentence-level, cross-chunk) ──
+                text = self._rep_detector.filter(text)
+                if not text or len(text.strip()) < 3:
+                    print(f"🔁 SKIPPED — all sentences already seen (RepDetector)")
+                    return ""
+
+                # NEW TEXT - send it
                 self.all_transcribed_texts.append(text_lower)
                 self.last_text = text
                 self.last_words = text.lower().split()
 
+                # Update context state — clean chunk
                 self.consecutive_clean_chunks += 1
                 if (self.consecutive_clean_chunks >= self.CLEAN_CHUNKS_TO_RESTORE
                         and len(text.split()) >= 5

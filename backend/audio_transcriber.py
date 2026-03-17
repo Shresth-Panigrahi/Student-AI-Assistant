@@ -209,6 +209,282 @@ def calculate_audio_energy(audio_data: np.ndarray) -> float:
     return float(np.sqrt(np.mean(audio_data ** 2)))
 
 
+# ============================================================
+# IMMEDIATE REPETITION DETECTOR (Layer 1)
+# ============================================================
+
+def detect_immediate_repetition(text: str) -> str:
+    """
+    Detect and remove immediate repetitions in a single chunk BEFORE they accumulate.
+    This catches patterns like "weekend. weekend. weekend. weekend." early.
+
+    Returns cleaned text or empty string if the entire chunk is garbage repetition.
+    """
+    if not text or not text.strip():
+        return text
+
+    text = text.strip()
+    words = text.split()
+
+    # Need at least some words to check
+    if len(words) < 4:
+        return text
+
+    # Check 1: Single word repeated (e.g., "weekend. weekend. weekend.")
+    # Count word occurrences (normalize for comparison)
+    word_counts = {}
+    for word in words:
+        # Strip punctuation for counting
+        clean_word = re.sub(r'[^\w]', '', word.lower())
+        if clean_word:
+            word_counts[clean_word] = word_counts.get(clean_word, 0) + 1
+
+    if word_counts:
+        max_count = max(word_counts.values())
+        # If a single word appears 3+ times AND it's more than 40% of the text
+        if max_count >= 3 and max_count / len(words) > 0.4:
+            # Find which word is repeated
+            repeated_word = max(word_counts, key=word_counts.get)
+            # Check if this is actually the entire chunk (just repeated word)
+            unique_words = len([w for w in word_counts.values() if w > 0])
+            if unique_words == 1:
+                print(f"🛑 REJECTED: Single word repetition '{repeated_word}' ({max_count}x)")
+                return ""
+            else:
+                # Try to keep non-repeated parts
+                # Remove the repeated word instances, keep others
+                cleaned_words = []
+                skipped = 0
+                for word in words:
+                    clean_word = re.sub(r'[^\w]', '', word.lower())
+                    if clean_word == repeated_word and skipped < max_count - 1:
+                        # Skip first 2 occurrences, keep the rest to avoid losing too much
+                        skipped += 1
+                        continue
+                    cleaned_words.append(word)
+
+                if cleaned_words:
+                    result = ' '.join(cleaned_words).strip()
+                    if result and len(result) > 5:
+                        print(f"✂️  Removed repeated word '{repeated_word}', kept: {result[:50]}...")
+                        return result
+
+    # Check 2: Short phrase repeated (2-3 words repeated 3+ times)
+    for phrase_len in [3, 2]:
+        if len(words) < phrase_len * 2:
+            continue
+
+        # Build n-grams
+        phrases = [' '.join(words[i:i+phrase_len]).lower() for i in range(len(words) - phrase_len + 1)]
+        phrase_counts = {}
+        for phrase in phrases:
+            # Normalize: remove punctuation
+            normalized = re.sub(r'[^\w\s]', '', phrase)
+            if normalized:
+                phrase_counts[normalized] = phrase_counts.get(normalized, 0) + 1
+
+        if phrase_counts:
+            max_phrase_count = max(phrase_counts.values())
+            if max_phrase_count >= 3:
+                repeated_phrase = max(phrase_counts, key=phrase_counts.get)
+
+                # Calculate what percentage of the text is this repetition
+                repeated_words_in_text = max_phrase_count * phrase_len
+                if repeated_words_in_text / len(words) > 0.5:
+                    # More than 50% is repetition - likely garbage
+                    print(f"🛑 REJECTED: Phrase repetition '{repeated_phrase}' ({max_phrase_count}x)")
+                    return ""
+
+    # Check 3: Check for pattern like "word1 word2 word1 word2 word1 word2"
+    # Alternating pattern detection
+    if len(words) >= 6:
+        # Convert to normalized form
+        normalized = [re.sub(r'[^\w]', '', w.lower()) for w in words if re.sub(r'[^\w]', '', w.lower())]
+        if len(normalized) >= 6:
+            # Check if it's an alternating pattern
+            is_alternating = True
+            for i in range(len(normalized) - 2):
+                if normalized[i] == normalized[i+2] and normalized[i] != normalized[i+1]:
+                    continue
+                else:
+                    is_alternating = False
+                    break
+
+            if is_alternating:
+                print(f"🛑 REJECTED: Alternating pattern detected")
+                return ""
+
+    return text
+
+
+# ============================================================
+# REAL-TIME REPETITION DETECTOR
+# ============================================================
+
+def _normalize_for_comparison(text: str) -> str:
+    """Normalize text for duplicate comparison: lowercase, strip punctuation, collapse whitespace."""
+    text = text.lower()
+    text = re.sub(r"[^\w\s]", "", text)   # strip punctuation
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _split_into_sentences(text: str) -> List[str]:
+    """Split text into sentence-like units on . ! ? and semicolons."""
+    parts = re.split(r"(?<=[.!?;])\s+", text.strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _word_jaccard(a: str, b: str) -> float:
+    """Word-level Jaccard similarity between two normalized strings."""
+    sa = set(a.split())
+    sb = set(b.split())
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / len(sa | sb)
+
+
+class RealtimeRepetitionDetector:
+    """
+    Sliding-window, sentence-level repetition detector that runs *before*
+    transcribed text is queued.
+
+    Design goals
+    ------------
+    1. **Sentence fingerprinting** — each incoming chunk is split into
+       sentences; every sentence is checked against a rolling window of
+       recently emitted sentences (normalised).
+    2. **Partial-match removal** — duplicate sentences are stripped out
+       rather than the whole chunk being discarded, preserving genuinely
+       new content that arrived in the same chunk.
+    3. **Fuzzy matching** — Jaccard similarity (configurable threshold)
+       catches near-duplicates produced by the 1.5 s audio overlap even
+       when Whisper adds/drops a word or two.
+    4. **Phrase-level n-gram check** — for sentences short enough that
+       Jaccard is unreliable, a bigram/trigram overlap check is used.
+    5. **Zero external deps** — pure Python / stdlib only.
+
+    Parameters
+    ----------
+    window_size : int
+        Number of recent sentences kept in memory (default 60 ≈ ~3 min
+        of typical lecture speech at ~1 sentence per 3 s).
+    similarity_threshold : float
+        Jaccard similarity above which a sentence is considered a duplicate
+        (default 0.72).
+    min_sentence_words : int
+        Sentences shorter than this are compared with exact-match only
+        (default 4 words).
+    """
+
+    def __init__(
+        self,
+        window_size: int = 60,
+        similarity_threshold: float = 0.72,
+        min_sentence_words: int = 4,
+    ):
+        self._window: deque[str] = deque(maxlen=window_size)   # normalised sentences
+        self._threshold = similarity_threshold
+        self._min_words = min_sentence_words
+        self._stats = {"checked": 0, "removed": 0, "chunks_modified": 0}
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def filter(self, text: str) -> str:
+        """
+        Remove sentences from *text* that are already present in the
+        recent window.  New (non-duplicate) sentences are added to the
+        window and the cleaned text is returned.
+
+        Returns an empty string if every sentence was a duplicate.
+        """
+        if not text or not text.strip():
+            return text
+
+        sentences = _split_into_sentences(text)
+        kept = []
+        any_removed = False
+
+        for sentence in sentences:
+            norm = _normalize_for_comparison(sentence)
+            self._stats["checked"] += 1
+
+            if self._is_duplicate(norm):
+                print(f"🔁 RepDetector dropped duplicate: '{sentence[:60]}'")
+                self._stats["removed"] += 1
+                any_removed = True
+            else:
+                kept.append(sentence)
+                self._window.append(norm)   # only register genuinely new sentences
+
+        if any_removed:
+            self._stats["chunks_modified"] += 1
+
+        if not kept:
+            return ""
+
+        result = " ".join(kept)
+        return result
+
+    def reset(self):
+        """Clear the window (call at start of each new recording session)."""
+        self._window.clear()
+        self._stats = {"checked": 0, "removed": 0, "chunks_modified": 0}
+
+    def get_stats(self) -> dict:
+        """Return a copy of internal statistics for logging/debugging."""
+        return dict(self._stats)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _is_duplicate(self, norm: str) -> bool:
+        """Check whether *norm* (already normalised) is a duplicate of
+        anything in the current window."""
+        words = norm.split()
+        n_words = len(words)
+
+        for existing in self._window:
+            # --- exact match ---
+            if norm == existing:
+                return True
+
+            existing_words = existing.split()
+
+            # --- short sentence: require exact match, skip fuzzy ---
+            if n_words < self._min_words or len(existing_words) < self._min_words:
+                continue
+
+            # --- Jaccard similarity ---
+            sim = _word_jaccard(norm, existing)
+            if sim >= self._threshold:
+                return True
+
+            # --- n-gram containment ---
+            # Catches cases where the new sentence is a sub-phrase of an
+            # existing one, OR mostly overlaps even if slightly longer.
+            # Works in both directions: short-in-long and long-containing-short.
+            if n_words >= 3 and len(existing_words) >= 3:
+                new_bigrams = set(
+                    words[i] + " " + words[i + 1]
+                    for i in range(n_words - 1)
+                )
+                ex_bigrams = set(
+                    existing_words[i] + " " + existing_words[i + 1]
+                    for i in range(len(existing_words) - 1)
+                )
+                if new_bigrams and ex_bigrams:
+                    # How much of the new sentence is already in the existing one
+                    containment = len(new_bigrams & ex_bigrams) / len(new_bigrams)
+                    if containment >= 0.80:   # 80 % of new bigrams already seen
+                        return True
+
+        return False
+
+
 class AudioTranscriber:
     """Real-time audio transcription with anti-hallucination"""
     
@@ -242,6 +518,13 @@ class AudioTranscriber:
         self.topic = None
         self.initial_prompt = "This is a lecture transcription. The speaker is discussing academic topics."
         self.dynamic_leak_patterns: List["re.Pattern"] = build_generic_leak_patterns()
+
+        # ── Real-time repetition detector ──────────────────────────────
+        self._rep_detector = RealtimeRepetitionDetector(
+            window_size=60,
+            similarity_threshold=0.72,
+            min_sentence_words=4,
+        )
         
         # Initialize model
         if WHISPER_AVAILABLE:
@@ -317,6 +600,10 @@ class AudioTranscriber:
         self.consecutive_clean_chunks = 0
         self.chunks_since_reset = 0
         self.total_bad_chunks = 0
+
+        # Reset the repetition detector for a clean session
+        self._rep_detector.reset()
+        print("🔁 RealtimeRepetitionDetector reset for new session")
         
         # Start single thread that handles both recording and transcription
         self.process_thread = threading.Thread(target=self._process_audio, daemon=True)
@@ -328,7 +615,13 @@ class AudioTranscriber:
     def stop_recording(self):
         """Stop recording"""
         self.is_recording = False
-        print("🛑 Stopped recording")
+        stats = self._rep_detector.get_stats()
+        print(
+            f"🛑 Stopped recording | RepDetector stats: "
+            f"{stats['removed']} sentences removed across "
+            f"{stats['chunks_modified']} chunks "
+            f"(checked {stats['checked']} total)"
+        )
     
     def _process_audio(self):
         """Single thread that records and transcribes with overlap"""
@@ -481,7 +774,13 @@ class AudioTranscriber:
                         print(f"⚠️  Too many bad chunks ({self.total_bad_chunks}), context permanently off")
                     return ""
                 
-                # Strip repetitions from combined text too
+                # ── NEW: Immediate repetition detection (before strip_repetitions) ──
+                text = detect_immediate_repetition(text)
+                if not text or len(text.strip()) < 3:
+                    print(f"🛑 SKIPPED — immediate repetition detected")
+                    return ""
+
+                # Strip remaining repetitions as backup
                 text = strip_repetitions(text)
                 
                 # Check if we've already sent this exact text
@@ -504,6 +803,12 @@ class AudioTranscriber:
                 # Remove repeated words from overlap region
                 text = self._remove_overlap_repetition(text)
                 if not text or len(text.strip()) < 3:
+                    return ""
+
+                # ── Real-time repetition detection (sentence-level, cross-chunk) ──
+                text = self._rep_detector.filter(text)
+                if not text or len(text.strip()) < 3:
+                    print(f"🔁 SKIPPED — all sentences already seen (RepDetector)")
                     return ""
                 
                 # NEW TEXT - send it
