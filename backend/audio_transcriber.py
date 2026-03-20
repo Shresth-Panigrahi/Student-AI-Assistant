@@ -41,6 +41,8 @@ HALLUCINATION_PATTERNS = [
     r"see you next time",
     r"bye[\s\-]*bye",
     r"goodbye",
+    r"smash the like button",
+    r"leave a comment",
     # Music/Sound hallucinations
     r"♪",
     r"🎵",
@@ -49,6 +51,9 @@ HALLUCINATION_PATTERNS = [
     r"\[laughter\]",
     r"\[silence\]",
     r"\[inaudible\]",
+    r"\[background music\]",
+    r"\[coughing\]",
+    r"\[cough\]",
     # Foreign language hallucinations (common with Whisper)
     r"字幕",
     r"ご視聴",
@@ -62,7 +67,7 @@ HALLUCINATION_PATTERNS = [
     # NOTE: Initial prompt leak patterns are now generated dynamically
     # by course_prompts.build_leak_patterns() based on the user's topic
     # Generic filler hallucinations
-    r"^(um+|uh+|ah+|oh+|hmm+)[\s\.]*$",
+    r"^(um+|uh+|ah+|oh+|hmm+|er+|ahem+)[\s\.]*$",
     r"^\.+$",
     r"^\s*$",
     # Common nonsense outputs
@@ -73,6 +78,24 @@ HALLUCINATION_PATTERNS = [
     r"^And,?\s*$",
     r"^The\s*$",
     r"^It's\s*$",
+    r"^Okay,?\s*$",
+    r"^Right,?\s*$",
+    r"^Yes,?\s*$",
+    r"^No,?\s*$",
+    r"^Well,?\s*$",
+    r"^Now,?\s*$",
+    # Hallucinated lecture transitions
+    r"^alright[\s,.]*$",
+    r"^moving on[\s,.]*$",
+    r"^next slide[\s,.]*$",
+    r"^as you can see[\s,.]*$",
+    r"^let's look at[\s,.]*$",
+    r"^if we look[\s,.]*$",
+    r"^here we have[\s,.]*$",
+    r"^this is called[\s,.]*$",
+    r"^in this case[\s,.]*$",
+    r"^essentially[\s,.]*$",
+    r"^basically[\s,.]*$",
     r"\b([a-zA-Z])(?:[-\s]?\1){3,}\b",   # B-b-b-b stutter
     r"\b(\w+)(?:\s+\1){3,}\b",           # repeated word
     # NOTE: Underscore/dash patterns are handled by strip_repetitions() instead
@@ -502,9 +525,9 @@ class AudioTranscriber:
         self.OVERLAP_DURATION = 1.5  # 1.5s overlap to avoid word boundary cuts
         
         # Anti-hallucination settings
-        self.MIN_AUDIO_ENERGY = 0.0001  # Minimum RMS energy to process (skip silence)
+        self.MIN_AUDIO_ENERGY = 0.005   # Minimum RMS energy to process (requires real speech)
         self.MIN_AUDIO_LENGTH = 1.5    # Minimum seconds of audio to process
-        self.NO_SPEECH_PROB_THRESHOLD = 0.89  # Lower - skip uncertain
+        self.NO_SPEECH_PROB_THRESHOLD = 0.6   # Skip segments >60% likely non-speech
         
         # Buffer with overlap support
         self.audio_buffer = []
@@ -720,13 +743,13 @@ class AudioTranscriber:
                 vad_filter=True,
                 vad_parameters=dict(
                     min_silence_duration_ms=600,
-                    speech_pad_ms=400,
-                    threshold=0.35,
+                    speech_pad_ms=600,
+                    threshold=0.5,
                 ),
                 condition_on_previous_text=self.condition_on_prev,
                 no_speech_threshold=self.NO_SPEECH_PROB_THRESHOLD,
                 log_prob_threshold=-1.0,
-                initial_prompt=self.initial_prompt if self.chunks_since_reset == 0 else None,
+                initial_prompt=self.initial_prompt,
                 hallucination_silence_threshold=2.0,
             )
             self.chunks_since_reset += 1
@@ -824,8 +847,8 @@ class AudioTranscriber:
                         print(f"✅ Context restored after {self.consecutive_clean_chunks} clean chunks")
                     self.condition_on_prev = True
 
-                    print(f"✅ NEW: {text}")
-                    return text
+                print(f"✅ NEW: {text}")
+                return text
             
         except Exception as e:
             print(f"❌ Transcription error: {e}")
