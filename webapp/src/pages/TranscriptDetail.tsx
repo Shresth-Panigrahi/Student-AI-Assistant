@@ -137,7 +137,7 @@ export default function TranscriptDetail() {
             className="lg:col-span-2 glass-effect rounded-2xl p-6"
           >
             {/* Tabs */}
-            <div className="flex gap-2 mb-6 border-b border-dark-500">
+            <div className="flex gap-2 mb-6 border-b border-dark-500 flex-wrap">
               {['transcript', 'summary', 'terms', 'qa'].map((tab) => (
                 <button
                   key={tab}
@@ -156,6 +156,15 @@ export default function TranscriptDetail() {
                   )}
                 </button>
               ))}
+              
+              {/* Chat Entry Route Tab */}
+              <button
+                onClick={() => navigate(`/chat/${session.id}`, { state: { session } })}
+                className="px-4 py-2 font-medium transition-colors relative flex items-center gap-2 text-gray-400 hover:text-royal-purple sm:ml-auto group"
+              >
+                <Sparkles className="w-4 h-4 text-royal-purple group-hover:animate-pulse" />
+                Open Chat Studio
+              </button>
             </div>
 
             {/* Content */}

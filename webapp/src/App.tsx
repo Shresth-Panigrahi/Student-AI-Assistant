@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import RecordingSession from './pages/RecordingSession'
 import History from './pages/History'
 import TranscriptDetail from './pages/TranscriptDetail'
+import ChatSession from './pages/ChatSession'
 import LandingPage from './pages/LandingPage'
 // import { useState } from 'react'
 
@@ -31,6 +32,7 @@ function AppContent() {
           <Route path="/session" element={isAuth ? <RecordingSession /> : <Navigate to="/auth" replace />} />
           <Route path="/history" element={isAuth ? <History /> : <Navigate to="/auth" replace />} />
           <Route path="/transcript/:id" element={isAuth ? <TranscriptDetail /> : <Navigate to="/auth" replace />} />
+          <Route path="/chat/:sessionId" element={isAuth ? <ChatSession /> : <Navigate to="/auth" replace />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

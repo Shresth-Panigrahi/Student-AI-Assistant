@@ -75,30 +75,32 @@ export default function History() {
           <div className="flex items-center gap-6">
             <button
               onClick={() => navigate('/')}
-              className="p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-royal-purple/50 transition-all duration-300 group"
+              className="p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-royal-purple/50 transition-all duration-300 group flex-shrink-0"
             >
               <ArrowLeft className="w-6 h-6 text-light-gray group-hover:text-white" />
             </button>
             <div>
-              <h1 className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white via-light-gray to-gray-400">
+              <h1 className="text-3xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white via-light-gray to-gray-400">
                 Learning History
               </h1>
-              <p className="text-secondary-gray mt-2">
+              <p className="text-secondary-gray mt-2 text-sm md:text-base hidden sm:block">
                 Access your past lectures, summaries, and insights
               </p>
             </div>
           </div>
 
-          {/* Search Bar */}
-          <div className="relative w-full md:w-96">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
-            <input
-              type="text"
-              placeholder="Search sessions..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-white placeholder-gray-500 focus:outline-none focus:border-royal-purple/50 focus:ring-1 focus:ring-royal-purple/50 transition-all font-medium"
-            />
+          <div className="flex flex-col md:flex-row gap-4 items-center w-full md:w-auto">
+            {/* Search Bar */}
+            <div className="relative w-full md:w-96">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+              <input
+                type="text"
+                placeholder="Search sessions..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 pl-11 pr-4 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-royal-purple/50 focus:ring-1 focus:ring-royal-purple/50 transition-all font-medium"
+              />
+            </div>
           </div>
         </motion.div>
 
