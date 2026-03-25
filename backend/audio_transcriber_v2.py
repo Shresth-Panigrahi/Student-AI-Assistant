@@ -1,16 +1,20 @@
 """
+audio-transcriber-v2.py
 Advanced Real-time audio transcription using Whisper Large V3 Turbo and Paraformer models.
 This is a newer implementation with improved hallucination filtering and model selection.
 
 Model Options:
-- whisper-large-v3-turbo: Best accuracy/speed balance, 809M params
+- large-v3-turbo: Best accuracy/speed balance, 809M params
 - paraformer-tdt: Fastest (3386x RTFx), 600M params, word timestamps
-- whisper-large-v3: Highest accuracy, 1550M params (slower)
+- large-v3: Highest accuracy, 1550M params (slower)
 
 Usage:
     Set TRANSCRIBER_MODEL env var to choose:
-    - "whisper-large-v3-turbo" (default)
-    - "whisper-large-v3"
+    - "large-v3-turbo" (default)
+    - "large-v3"
+    - "turbo"
+    - "small"
+    - "medium"
     - "paraformer"
 """
 
@@ -36,7 +40,7 @@ except ImportError:
     print("⚠️  course_prompts not available")
 
 # Model selection from environment
-DEFAULT_MODEL = os.getenv("TRANSCRIBER_MODEL", "whisper-large-v3-turbo")
+DEFAULT_MODEL = os.getenv("TRANSCRIBER_MODEL", "medium")
 
 # Try to import STT libraries
 WHISPER_AVAILABLE = False
@@ -580,8 +584,8 @@ class AudioTranscriberV2:
         elif "paraformer" in self.model_name.lower():
             self._load_paraformer()
         else:
-            # Default to whisper-large-v3-turbo
-            self.model_name = "whisper-large-v3-turbo"
+            # Default to medium
+            self.model_name = "medium"
             self._load_whisper()
 
     def _load_whisper(self):
@@ -596,13 +600,13 @@ class AudioTranscriberV2:
         try:
             # Model size mapping
             model_map = {
-                "whisper-large-v3-turbo": "large-v3-turbo",
+                "whisper-medium": "medium",
                 "whisper-large-v3": "large-v3",
                 "whisper-medium": "medium",
                 "whisper-small": "small",
             }
 
-            model_size = model_map.get(self.model_name, "large-v3-turbo")
+            model_size = model_map.get(self.model_name, "medium")
             compute = "float16" if self.device == "cuda" else "int8"
 
             print(f"🔄 Loading {model_size} on {self.device}...")
@@ -928,7 +932,7 @@ def get_transcriber_v2() -> AudioTranscriberV2:
     """Get or create V2 transcriber instance."""
     global _transcriber_v2
     if _transcriber_v2 is None:
-        model = os.getenv("TRANSCRIBER_MODEL", "whisper-large-v3-turbo")
+        model = os.getenv("TRANSCRIBER_MODEL", "medium")
         device = os.getenv("TRANSCRIBER_DEVICE", "cuda")
         _transcriber_v2 = AudioTranscriberV2(model_name=model, device=device)
     return _transcriber_v2
@@ -948,3 +952,70 @@ def get_transcriber():
 def is_whisper_available():
     """Check if transcriber is available."""
     return is_whisper_available_v2()
+
+
+def transcribe_file(file_path: str, model_name: str = None) -> dict:
+    """
+    Transcribe an entire audio file (batch transcription).
+    Returns dict with 'transcript', 'duration', 'language', 'error'.
+    """
+    if not WHISPER_AVAILABLE:
+        return {"error": "Whisper not available", "transcript": "", "duration": 0}
+
+    try:
+        import faster_whisper
+
+        # Use default model if not specified
+        if model_name is None:
+            model_name = os.getenv("TRANSCRIBER_MODEL", "medium")
+
+        print(f"🔄 Loading Whisper model: {model_name}...")
+        model = faster_whisper.WhisperModel(
+            model_name,
+            device=os.getenv("TRANSCRIBER_DEVICE", "auto"),
+            compute_type="float16"
+        )
+
+        print(f"📝 Transcribing file: {file_path}")
+        segments, info = model.transcribe(
+            file_path,
+            beam_size=5,
+            temperature=0.0,
+            language="en",
+            vad_filter=True,
+            vad_parameters=dict(
+                min_silence_duration_ms=1000,
+                speech_pad_ms=600,
+                threshold=0.5,
+            ),
+        )
+
+        # Collect all transcribed text
+        transcript_parts = []
+        for segment in segments:
+            text = segment.text.strip()
+            if text:
+                # Apply filtering to each segment
+                if not is_hallucination(text):
+                    text = strip_repetitions(text)
+                    if text and len(text) > 2:
+                        transcript_parts.append(text)
+
+        full_transcript = " ".join(transcript_parts).strip()
+
+        print(f"✅ Transcription complete: {len(full_transcript)} chars, {info.duration:.2f}s")
+
+        return {
+            "transcript": full_transcript,
+            "duration": info.duration,
+            "language": info.language,
+            "error": None
+        }
+
+    except Exception as e:
+        print(f"❌ Batch transcription error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "transcript": "", "duration": 0}
+
+

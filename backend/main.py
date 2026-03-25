@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -9,6 +9,7 @@ import asyncio
 import uvicorn
 import hashlib
 import re
+import tempfile
 from dotenv import load_dotenv
 from groq import Groq
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -27,10 +28,11 @@ except:
 import database_mongo as db
 
 # Import audio transcriber
-
+from transcribe_enhanced import transcribe_file
 #from audio_transcriber import get_transcriber, is_whisper_available
 from audio_transcriber_v2 import get_transcriber_v2 as get_transcriber
 from audio_transcriber_v2 import is_whisper_available_v2 as is_whisper_available
+#from audio_transcriber_v2 import transcribe_file  # disabled: using transcribe_enhanced
 #changed to v3 (rolling correction)
 """ from audio_transcriber_v3 import get_transcriber_v3 as get_transcriber
 from audio_transcriber_v3 import is_whisper_available_v3 as is_whisper_available """
@@ -554,6 +556,69 @@ async def manual_transcribe(text: str):
         })
         return {"success": True, "message": "Text added"}
     return {"success": False, "message": "Not recording"}
+
+
+# File upload transcription endpoint
+@app.post("/api/transcribe/upload")
+@limiter.limit("5/minute")
+async def upload_and_transcribe(request: Request, file: UploadFile = File(...)):
+    """Upload an audio file and get the full transcript"""
+    # Check if Whisper is available
+    if not is_whisper_available():
+        return {"success": False, "message": "Whisper not available. Install with: pip install faster-whisper"}
+
+    # Validate file type
+    allowed_extensions = {'.mp3', '.wav', '.m4a', '.flac', '.ogg', '.webm', '.wma'}
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    if file_ext not in allowed_extensions:
+        return {
+            "success": False,
+            "message": f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}"
+        }
+
+    # Save uploaded file to temp location
+    temp_dir = tempfile.gettempdir()
+    temp_path = os.path.join(temp_dir, f"upload_{int(datetime.now().timestamp())}_{file.filename}")
+
+    try:
+        # Write uploaded file to temp location
+        content = await file.read()
+        with open(temp_path, "wb") as f:
+            f.write(content)
+
+        print(f"📂 Received file: {file.filename} ({len(content)} bytes)")
+
+        # Run transcription in thread pool
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, transcribe_file, temp_path)
+
+        if result.get("error"):
+            return {"success": False, "message": result["error"]}
+
+        # Store transcript in current session
+        current_session["transcript"] = result["transcript"]
+
+        return {
+            "success": True,
+            "transcript": result["transcript"],
+            "duration": result.get("duration", 0),
+            "language": result.get("language", "en"),
+            "message": "File transcribed successfully"
+        }
+
+    except Exception as e:
+        print(f"❌ Upload transcription error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "message": f"Error processing file: {str(e)}"}
+
+    finally:
+        # Cleanup temp file
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
 
 # Authentication endpoints
 def hash_password(password: str) -> str:
