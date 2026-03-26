@@ -9,7 +9,8 @@ import { api } from '@/services/api'
 import axios from 'axios'
 
 import * as pdfjsLib from 'pdfjs-dist'
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 // Subcomponents will be defined below or kept in line for now depending on size
 export default function ChatSession() {

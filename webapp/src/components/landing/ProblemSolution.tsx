@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertCircle, Clock, Search, CheckCircle, Smartphone, Zap, Bot, FileText, Check } from 'lucide-react';
+import { AlertCircle, Clock, Search, CheckCircle, Zap, Bot } from 'lucide-react';
 
 const ProblemSolution = () => {
     const [activeScenario, setActiveScenario] = useState(0);

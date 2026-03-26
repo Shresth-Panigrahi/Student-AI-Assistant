@@ -62,7 +62,7 @@ export default function History() {
         <div className="absolute top-0 left-1/4 w-[800px] h-[800px] bg-royal-purple/20 rounded-full blur-[120px] animate-float" />
         <div className="absolute top-1/2 right-0 w-[600px] h-[600px] bg-deep-magenta/15 rounded-full blur-[100px] animate-float [animation-delay:2s]" />
         <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-orchid/10 rounded-full blur-[80px] animate-float [animation-delay:4s]" />
-        <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.05)_1px,transparent_0)] bg-[length:18px_18px] opacity-[0.04]" />
       </div>
 
       <div className="relative z-10 max-w-7xl mx-auto p-6 md:p-12">

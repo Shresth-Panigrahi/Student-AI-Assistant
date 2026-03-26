@@ -9,7 +9,7 @@ Model Options:
 
 Usage:
     Set TRANSCRIBER_MODEL env var to choose:
-    - "whisper-large-v3-turbo" (default)
+    - "whisper-medium" (default)
     - "whisper-large-v3"
     - "paraformer"
 """
@@ -36,7 +36,7 @@ except ImportError:
     print("⚠️  course_prompts not available")
 
 # Model selection from environment
-DEFAULT_MODEL = os.getenv("TRANSCRIBER_MODEL", "whisper-large-v3-turbo")
+DEFAULT_MODEL = os.getenv("TRANSCRIBER_MODEL", "whisper-medium")
 
 # Try to import STT libraries
 WHISPER_AVAILABLE = False
@@ -580,8 +580,8 @@ class AudioTranscriberV2:
         elif "paraformer" in self.model_name.lower():
             self._load_paraformer()
         else:
-            # Default to whisper-large-v3-turbo
-            self.model_name = "whisper-large-v3-turbo"
+            # Default to whisper-medium
+            self.model_name = "whisper-medium"
             self._load_whisper()
 
     def _load_whisper(self):
@@ -602,7 +602,7 @@ class AudioTranscriberV2:
                 "whisper-small": "small",
             }
 
-            model_size = model_map.get(self.model_name, "large-v3-turbo")
+            model_size = model_map.get(self.model_name, "medium")
             compute = "float16" if self.device == "cuda" else "int8"
 
             print(f"🔄 Loading {model_size} on {self.device}...")
@@ -928,7 +928,7 @@ def get_transcriber_v2() -> AudioTranscriberV2:
     """Get or create V2 transcriber instance."""
     global _transcriber_v2
     if _transcriber_v2 is None:
-        model = os.getenv("TRANSCRIBER_MODEL", "whisper-large-v3-turbo")
+        model = os.getenv("TRANSCRIBER_MODEL", "whisper-medium")
         device = os.getenv("TRANSCRIBER_DEVICE", "cuda")
         _transcriber_v2 = AudioTranscriberV2(model_name=model, device=device)
     return _transcriber_v2

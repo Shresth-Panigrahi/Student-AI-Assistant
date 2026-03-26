@@ -50,7 +50,7 @@ const LandingPage = () => {
                     Ready to transform <br /> your learning?
                 </h2>
                 <button
-                    onClick={() => window.location.href = '/auth'}
+                    onClick={() => { window.location.hash = '/auth' }}
                     className="relative z-10 px-10 py-5 bg-gradient-to-r from-royal-purple to-deep-magenta rounded-full text-xl font-bold shadow-[0_0_50px_rgba(109,40,217,0.5)] hover:scale-105 hover:shadow-[0_0_80px_rgba(109,40,217,0.7)] transition-all duration-300"
                 >
                     Start Recording Free

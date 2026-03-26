@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react'
 import MicIcon from '@/components/MicIcon'
 import QuestionIcon from '@/components/QuestionIcon'
 import NavigationLoader from '@/components/NavigationLoader'
+import logoUrl from '@/assets/logo.png'
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -324,16 +325,36 @@ export default function Dashboard() {
             borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <img src="/logo.png" alt="Logo" style={{ width: '80px', height: '80px', objectFit: 'contain' }} />
+              <img src={logoUrl} alt="Logo" style={{ width: '80px', height: '80px', objectFit: 'contain' }} />
               <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#ffffff', letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>
                 Student AI <span style={{ color: '#ef4444' }}>Assistant</span>
               </h1>
             </div>
             <div style={{ display: 'flex', gap: '32px', alignItems: 'center' }}>
-              <a href="#home" style={{ color: '#ffffff', textDecoration: 'none', fontSize: '15px', fontWeight: '500' }}>Home</a>
-              <a href="#features" style={{ color: '#ffffff', textDecoration: 'none', fontSize: '15px', fontWeight: '500' }}>Features</a>
-              <a href="#how-it-works" style={{ color: '#ffffff', textDecoration: 'none', fontSize: '15px', fontWeight: '500' }}>How It Works</a>
-              <a href="#about" style={{ color: '#ffffff', textDecoration: 'none', fontSize: '15px', fontWeight: '500' }}>About</a>
+              <button
+                onClick={() => handleNavigation('/')}
+                style={{ background: 'transparent', color: '#ffffff', border: 'none', fontSize: '15px', fontWeight: '500', cursor: 'pointer' }}
+              >
+                Home
+              </button>
+              <button
+                onClick={() => handleNavigation('/')}
+                style={{ background: 'transparent', color: '#ffffff', border: 'none', fontSize: '15px', fontWeight: '500', cursor: 'pointer' }}
+              >
+                Features
+              </button>
+              <button
+                onClick={() => handleNavigation('/')}
+                style={{ background: 'transparent', color: '#ffffff', border: 'none', fontSize: '15px', fontWeight: '500', cursor: 'pointer' }}
+              >
+                How It Works
+              </button>
+              <button
+                onClick={() => handleNavigation('/')}
+                style={{ background: 'transparent', color: '#ffffff', border: 'none', fontSize: '15px', fontWeight: '500', cursor: 'pointer' }}
+              >
+                About
+              </button>
               <button
                 onClick={() => handleNavigation('/history')}
                 style={{

@@ -1,12 +1,16 @@
 import axios from 'axios'
+import { electronIpc } from '@/electron/ipc'
 
-const API_BASE = 'http://localhost:8000/api'
+const client = axios.create({
+  baseURL: electronIpc.backendUrl(),
+  timeout: 60_000,
+})
 
 export const api = {
   // Health check
   healthCheck: async () => {
     try {
-      const response = await axios.get('http://localhost:8000/api/health')
+      const response = await client.get('/api/health')
       return response.data
     } catch (error) {
       console.error('Health check failed:', error)
@@ -16,71 +20,71 @@ export const api = {
 
   // Session management
   startSession: async (topic?: string) => {
-    const response = await axios.post(`${API_BASE}/session/start`, { topic: topic || null })
+    const response = await client.post('/api/session/start', { topic: topic || null })
     return response.data
   },
 
   pollTranscription: async () => {
-    const response = await axios.get(`${API_BASE}/transcription/poll`)
+    const response = await client.get('/api/transcription/poll')
     return response.data
   },
 
   stopSession: async () => {
-    const response = await axios.post(`${API_BASE}/session/stop`)
+    const response = await client.post('/api/session/stop')
     return response.data
   },
 
   saveSession: async (transcript: string, chat: any[], name?: string) => {
-    const response = await axios.post(`${API_BASE}/session/save`, { transcript, chat, name })
+    const response = await client.post('/api/session/save', { transcript, chat, name })
     return response.data
   },
 
   // History
   getSessions: async () => {
-    const response = await axios.get(`${API_BASE}/sessions`)
+    const response = await client.get('/api/sessions')
     return response.data
   },
 
   getSession: async (id: string) => {
-    const response = await axios.get(`${API_BASE}/sessions/${id}`)
+    const response = await client.get(`/api/sessions/${id}`)
     return response.data
   },
 
   deleteSession: async (id: string) => {
-    const response = await axios.delete(`${API_BASE}/sessions/${id}`)
+    const response = await client.delete(`/api/sessions/${id}`)
     return response.data
   },
 
   // Q&A
   askQuestion: async (question: string, thinkMode: boolean = false) => {
-    const response = await axios.post(`${API_BASE}/qa/ask`, { question, think_mode: thinkMode })
+    const response = await client.post('/api/qa/ask', { question, think_mode: thinkMode })
     return response.data
   },
 
   // Analysis
   summarizeTranscript: async (sessionId: string) => {
-    const response = await axios.post(`${API_BASE}/analyze/summarize`, { sessionId })
+    const response = await client.post('/api/analyze/summarize', { sessionId })
     return response.data
   },
 
   extractTerminologies: async (sessionId: string) => {
-    const response = await axios.post(`${API_BASE}/analyze/terminologies`, { sessionId })
+    const response = await client.post('/api/analyze/terminologies', { sessionId })
     return response.data
   },
 
   generateQA: async (sessionId: string) => {
-    const response = await axios.post(`${API_BASE}/analyze/qa`, { sessionId })
+    const response = await client.post('/api/analyze/qa', { sessionId })
     return response.data
   },
 
   // Authentication
   login: async (username_or_email: string, password: string) => {
-    const response = await axios.post(`${API_BASE}/auth/login`, { username_or_email, password })
+    const response = await client.post('/api/auth/login', { username_or_email, password })
     return response.data
   },
 
   signup: async (data: { name: string; username: string; email: string; password: string }) => {
-    const response = await axios.post(`${API_BASE}/auth/signup`, data)
+    const response = await client.post('/api/auth/signup', data)
     return response.data
   },
 }

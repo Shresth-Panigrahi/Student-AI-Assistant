@@ -11,3 +11,4 @@ langgraph>=0.0.30
 slowapi>=0.1.9
 langchain-core>=0.1.0
 faster-whisper>=1.0.0
+pyinstaller>=6.11.1

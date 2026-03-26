@@ -26,14 +26,13 @@ except:
 # Import database module (MongoDB)
 import database_mongo as db
 
-# Import audio transcriber
-
-#from audio_transcriber import get_transcriber, is_whisper_available
-from audio_transcriber_v2 import get_transcriber_v2 as get_transcriber
-from audio_transcriber_v2 import is_whisper_available_v2 as is_whisper_available
-#changed to v3 (rolling correction)
-""" from audio_transcriber_v3 import get_transcriber_v3 as get_transcriber
-from audio_transcriber_v3 import is_whisper_available_v3 as is_whisper_available """
+# Import audio transcriber (V4 — WhisperX with word-level timestamps)
+# Previous versions kept for reference:
+#   V1: from audio_transcriber import get_transcriber, is_whisper_available
+#   V2: from audio_transcriber_v2 import get_transcriber_v2 as get_transcriber
+#   V3: from audio_transcriber_v3 import get_transcriber_v3 as get_transcriber (rolling correction)
+from audio_transcriber_v4 import get_transcriber_v4 as get_transcriber
+from audio_transcriber_v4 import is_whisperx_available as is_whisper_available
 
 # Import Q&A chatbot
 from qa_chatbot import get_chatbot, is_ollama_available
@@ -148,11 +147,16 @@ async def health_check():
 async def start_session(request: Request, body: StartSessionRequest = StartSessionRequest()):
     """Start a new recording session with real Whisper transcription"""
     global transcription_queue
-    
-    # Set recording state but DON'T clear transcript/messages
-    # This allows multiple recordings in the same session
-    current_session["is_recording"] = True
-    transcription_queue.clear()  # Clear only the pending queue
+
+    if current_session["is_recording"]:
+        await manager.broadcast({
+            "type": "status",
+            "status": "recording"
+        })
+        return {"success": True, "message": "Recording is already in progress"}
+
+    # Clear only the pending queue so the active session transcript stays intact.
+    transcription_queue.clear()
     
     # DON'T reset chatbot - keep conversation context
     # if is_ollama_available():
@@ -195,6 +199,7 @@ async def start_session(request: Request, body: StartSessionRequest = StartSessi
     success = transcriber.start_recording(sync_callback)
     
     if success:
+        current_session["is_recording"] = True
         await manager.broadcast({
             "type": "status",
             "status": "recording"
@@ -635,6 +640,8 @@ async def login(request: Request, body: LoginRequest):
     }
 
 if __name__ == "__main__":
-    print("🚀 Starting AI Student Assistant API on http://localhost:8000")
-    print("📚 API Documentation: http://localhost:8000/docs")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    host = os.getenv("LECTURE_LYFT_BACKEND_HOST", "127.0.0.1")
+    port = int(os.getenv("LECTURE_LYFT_BACKEND_PORT", "8000"))
+    print(f"🚀 Starting AI Student Assistant API on http://{host}:{port}")
+    print(f"📚 API Documentation: http://{host}:{port}/docs")
+    uvicorn.run(app, host=host, port=port, log_level=os.getenv("LECTURE_LYFT_BACKEND_LOG_LEVEL", "info"))

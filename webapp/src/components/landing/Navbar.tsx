@@ -2,10 +2,16 @@ import { useState, useEffect } from 'react';
 import { Menu, X } from 'lucide-react';
 
 import { motion } from 'framer-motion';
+import logoUrl from '@/assets/logo.png';
 
 const Navbar = () => {
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+    const goToSection = (sectionId: string) => {
+        document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
+        setIsMobileMenuOpen(false);
+    };
 
     useEffect(() => {
         const handleScroll = () => {
@@ -26,7 +32,7 @@ const Navbar = () => {
                 {/* Logo */}
                 <div className="flex items-center gap-4 group cursor-pointer">
                     <div className="relative w-24 h-24 flex items-center justify-center transition-transform hover:scale-105">
-                        <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
+                        <img src={logoUrl} alt="Logo" className="w-full h-full object-contain" />
                     </div>
                     <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-light-gray whitespace-nowrap">
                         Lecture Lyft
@@ -36,26 +42,34 @@ const Navbar = () => {
                 {/* Desktop Nav */}
                 <div className="hidden md:flex items-center gap-8">
                     {[
-                        { name: 'Features', link: '#features' },
-                        { name: 'How it Works', link: '#how-it-works' },
-                        { name: 'Stats', link: '#stats' },
-                        { name: 'History', link: '/history' },
+                        { name: 'Features', sectionId: 'features' },
+                        { name: 'How it Works', sectionId: 'how-it-works' },
+                        { name: 'Stats', sectionId: 'stats' },
                     ].map((item) => (
-                        <a
+                        <button
+                            type="button"
                             key={item.name}
-                            href={item.link}
+                            onClick={() => goToSection(item.sectionId)}
                             className="text-sm font-medium text-light-gray hover:text-white transition-colors relative group"
                         >
                             {item.name}
                             <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-gradient-to-r from-royal-purple to-deep-magenta group-hover:w-full transition-all duration-300" />
-                        </a>
+                        </button>
                     ))}
+                    <button
+                        type="button"
+                        onClick={() => { window.location.hash = '/history' }}
+                        className="text-sm font-medium text-light-gray hover:text-white transition-colors relative group"
+                    >
+                        History
+                        <span className="absolute -bottom-1 left-0 w-0 h-0.5 bg-gradient-to-r from-royal-purple to-deep-magenta group-hover:w-full transition-all duration-300" />
+                    </button>
                 </div>
 
                 {/* CTA Button */}
                 <div className="hidden md:block">
                     <motion.button
-                        onClick={() => window.location.href = '/session'}
+                        onClick={() => { window.location.hash = '/session' }}
                         initial="initial"
                         whileHover="hover"
                         variants={{
@@ -118,22 +132,31 @@ const Navbar = () => {
             {isMobileMenuOpen && (
                 <div className="md:hidden absolute top-20 left-0 w-full bg-[#0D0D12] border-b border-royal-purple/10 p-6 flex flex-col gap-4 shadow-2xl animate-in slide-in-from-top-4">
                     {[
-                        { name: 'Features', link: '#features' },
-                        { name: 'How it Works', link: '#how-it-works' },
-                        { name: 'Stats', link: '#stats' },
-                        { name: 'History', link: '/history' },
+                        { name: 'Features', sectionId: 'features' },
+                        { name: 'How it Works', sectionId: 'how-it-works' },
+                        { name: 'Stats', sectionId: 'stats' },
                     ].map((item) => (
-                        <a
+                        <button
+                            type="button"
                             key={item.name}
-                            href={item.link}
                             className="text-light-gray hover:text-white text-lg font-medium py-2"
-                            onClick={() => setIsMobileMenuOpen(false)}
+                            onClick={() => goToSection(item.sectionId)}
                         >
                             {item.name}
-                        </a>
+                        </button>
                     ))}
                     <button
-                        onClick={() => window.location.href = '/session'}
+                        type="button"
+                        onClick={() => {
+                            setIsMobileMenuOpen(false)
+                            window.location.hash = '/history'
+                        }}
+                        className="text-left text-light-gray hover:text-white text-lg font-medium py-2"
+                    >
+                        History
+                    </button>
+                    <button
+                        onClick={() => { window.location.hash = '/session' }}
                         className="w-full mt-4 h-12 rounded-xl bg-gradient-to-r from-royal-purple to-deep-magenta text-white font-bold shadow-lg"
                     >
                         Start Recording

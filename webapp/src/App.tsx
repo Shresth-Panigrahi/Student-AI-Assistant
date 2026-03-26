@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 // import NavigationLoader from './components/NavigationLoader'
 import Auth from './pages/Auth'
@@ -8,10 +8,16 @@ import History from './pages/History'
 import TranscriptDetail from './pages/TranscriptDetail'
 import ChatSession from './pages/ChatSession'
 import LandingPage from './pages/LandingPage'
+import DesktopChrome from './components/desktop/DesktopChrome'
+import UpdateBanner from './components/desktop/UpdateBanner'
+import { useElectron } from './electron/useElectron'
 // import { useState } from 'react'
 
 function AppContent() {
   const isAuth = !!localStorage.getItem('user') // Matching Auth.tsx logic
+  const electron = useElectron()
+  const topOffset = electron.useCustomTitleBar ? 48 : 0
+  const appPaddingTop = electron.useCustomTitleBar ? 'pt-12' : ''
 
   // Note: Previous "InitialSplash" is removed in favor of LandingPage
 
@@ -21,7 +27,24 @@ function AppContent() {
         {/* {showLoader && <NavigationLoader key="nav-loader" />} */}
       </AnimatePresence>
 
-      <div className="min-h-screen bg-true-black">
+      {electron.useCustomTitleBar && (
+        <DesktopChrome
+          isMaximized={electron.isMaximized}
+          onMinimize={electron.windowControls.minimize}
+          onToggleMaximize={electron.windowControls.maximize}
+          onClose={electron.windowControls.close}
+        />
+      )}
+
+      <UpdateBanner
+        status={electron.updateStatus}
+        offsetTop={topOffset}
+        onDismiss={electron.dismissUpdate}
+        onInstall={electron.installUpdate}
+        onCheck={electron.checkForUpdates}
+      />
+
+      <div className={`min-h-screen bg-true-black ${appPaddingTop}`}>
         <Routes>
           {/* Public Routes */}
           <Route path="/" element={<LandingPage />} />

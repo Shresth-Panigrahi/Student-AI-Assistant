@@ -1,15 +1,15 @@
-import React from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 
 const StatsTrust = () => {
-    const [stats, setStats] = React.useState({
+    const [stats, setStats] = useState({
         sessions: 0,
         messages: 0,
         terminologies: 0,
         transcript_length: 0
     });
 
-    React.useEffect(() => {
+    useEffect(() => {
         const fetchStats = async () => {
             try {
                 // Import api dynamically to avoid circular dependencies if any
@@ -78,7 +78,7 @@ const StatsTrust = () => {
                     className="flex gap-12 whitespace-nowrap items-center min-w-max"
                 >
                     {[...Array(2)].map((_, i) => (
-                        <React.Fragment key={i}>
+                        <Fragment key={i}>
                             <span className="text-lg text-white/80">🚀 Sarah from MIT just generated a summary</span>
                             <span className="w-2 h-2 rounded-full bg-royal-purple" />
                             <span className="text-lg text-white/80">⚡ Alex saved 3 hours this week</span>
@@ -87,7 +87,7 @@ const StatsTrust = () => {
                             <span className="w-2 h-2 rounded-full bg-orchid" />
                             <span className="text-lg text-white/80">🎓 1,247 lectures transcribed today</span>
                             <span className="w-2 h-2 rounded-full bg-gold-highlight" />
-                        </React.Fragment>
+                        </Fragment>
                     ))}
                 </motion.div>
             </div>

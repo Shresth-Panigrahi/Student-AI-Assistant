@@ -1,0 +1,233 @@
+You are a senior Electron + React + Python architect with production experience.
+
+Your task:
+Convert the following specification into a COMPLETE, PRODUCTION-READY CODEBASE.
+
+STRICT INSTRUCTIONS:
+
+* Do NOT summarize
+* Do NOT explain
+* Do NOT describe architecture
+* ONLY output code and file structure
+* Generate ALL required files with full implementations
+* Follow best practices for security, performance, and cross-platform support
+* Use TypeScript for Electron code
+* Ensure everything is runnable
+
+OUTPUT FORMAT:
+
+1. First print the FULL folder structure
+2. Then generate each file like this:
+
+// FILE: electron/main.ts <code>
+
+// FILE: electron/backend-manager.ts <code>
+
+(and so on for ALL files)
+
+If output is too long:
+
+* Continue from where you left off
+* Do NOT restart
+* Do NOT skip files
+
+---
+
+PROJECT SPECIFICATION:
+
+Convert and implement Lecture Lyft as a production-grade, native-feeling Electron desktop application — every platform detail matters, every native integration must feel like it belongs on the OS.
+
+🎯 CONTEXT & EXISTING CODEBASE
+
+Lecture Lyft is an existing full-stack app:
+
+Frontend: React 18 + TypeScript, Vite, Tailwind CSS, Framer Motion, Zustand, Axios, React Router v6, Lucide React — lives in /webapp
+
+Backend: FastAPI (Python 3.10+), faster-whisper, Groq API, LangChain + LangGraph, MongoDB Atlas, SlowAPI, WebSocket — lives in /backend
+
+The app does real-time microphone transcription, AI Q&A, summarization, quiz generation, terminology extraction
+
+The goal is to wrap this into an Electron shell that:
+
+* Launches the FastAPI backend as a child process automatically
+* Serves the React frontend inside Electron (NOT browser)
+* Exposes native OS capabilities
+* Packages into .exe, .dmg, .AppImage via electron-builder
+
+DO NOT rewrite frontend/backend — wrap them.
+
+---
+
+📁 PROJECT STRUCTURE
+
+lecture-lyft/
+├── electron/
+│   ├── main.ts
+│   ├── preload.ts
+│   ├── backend-manager.ts
+│   ├── tray-manager.ts
+│   ├── window-manager.ts
+│   ├── ipc-handlers.ts
+│   ├── auto-updater.ts
+│   ├── menu-builder.ts
+│   └── utils/
+│       ├── paths.ts
+│       └── logger.ts
+│
+├── webapp/
+│   └── src/electron/
+│       ├── useElectron.ts
+│       └── ipc.ts
+│
+├── backend/
+├── resources/
+├── electron-builder.yml
+├── tsconfig.electron.json
+├── package.json
+
+---
+
+⚙️ PACKAGE.JSON
+
+(Include scripts exactly as specified)
+
+---
+
+🏗️ ELECTRON MAIN PROCESS
+
+Requirements:
+
+* app lifecycle handling
+* backend startup + health check
+* window creation AFTER backend ready
+* macOS behavior (don’t quit)
+* secure settings (no nodeIntegration)
+* permission handling (microphone only)
+
+---
+
+🖥️ WINDOW MANAGER
+
+* BrowserWindow config
+* dev vs prod loading
+* window state persistence
+* macOS traffic lights
+* Windows acrylic
+* show only after ready
+
+---
+
+🐍 BACKEND MANAGER
+
+* spawn python in dev
+* spawn compiled binary in prod
+* logging via electron-log
+* restart logic
+* clean shutdown (SIGTERM → SIGKILL)
+* health check polling
+
+---
+
+🌊 SPLASH SCREEN
+
+* separate window
+* progress animation
+* IPC updates
+* fade out on ready
+
+---
+
+🔌 PRELOAD
+
+* contextBridge
+* expose safe APIs only
+
+---
+
+🍱 SYSTEM TRAY
+
+* tray icon states (idle/recording/processing)
+* animated recording state
+* context menu
+* notifications
+
+---
+
+📋 MENU
+
+* full native menu
+* keyboard shortcuts
+* IPC communication
+
+---
+
+🔔 AUTO UPDATER
+
+* electron-updater
+* GitHub releases
+* renderer notifications
+
+---
+
+🎙️ MICROPHONE PERMISSION
+
+* macOS permission request
+* fallback dialog if denied
+
+---
+
+🛠️ IPC HANDLERS
+
+* dialogs
+* store
+* window controls
+* notifications
+* tray updates
+
+---
+
+📦 ELECTRON BUILDER
+
+* mac, win, linux configs
+* icons
+* installer setup
+* extraResources for backend
+
+---
+
+⚛️ REACT ADDITIONS
+
+* useElectron hook
+* conditional UI
+* update banner
+* custom title bar (Windows/Linux)
+
+---
+
+🔒 DEEP LINKING
+
+* lecturelyft:// protocol
+* session routing
+
+---
+
+📊 PERFORMANCE
+
+* launch < 4s
+* memory < 300MB
+* GPU enabled
+
+---
+
+✅ DEFINITION OF DONE
+
+* npm run dev works fully
+* npm run dist builds installers
+* tray, notifications, updater all work
+* backend lifecycle managed properly
+* splash screen working
+* all features functional
+
+---
+
+NOW GENERATE THE FULL CODEBASE.

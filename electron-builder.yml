@@ -1,0 +1,80 @@
+appId: com.lecturelyft.desktop
+productName: Lecture Lyft
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+asar: true
+compression: maximum
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - dist-electron/**/*
+  - webapp/dist/**/*
+  - package.json
+
+extraResources:
+  - from: resources/backend-dist
+    to: backend
+    filter:
+      - "**/*"
+
+protocols:
+  - name: Lecture Lyft Deep Links
+    schemes:
+      - lecturelyft
+
+mac:
+  category: public.app-category.education
+  icon: resources/icons/icon.png
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  extendInfo:
+    NSMicrophoneUsageDescription: Lecture Lyft needs microphone access for lecture transcription.
+
+dmg:
+  sign: false
+  window:
+    width: 540
+    height: 380
+  contents:
+    - x: 150
+      y: 190
+      type: file
+    - x: 390
+      y: 190
+      type: link
+      path: /Applications
+
+win:
+  icon: resources/icons/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+
+linux:
+  icon: resources/icons
+  category: Education
+  target:
+    - target: AppImage
+      arch:
+        - x64
+
+extraMetadata:
+  main: dist-electron/main.js

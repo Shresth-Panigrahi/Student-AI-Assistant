@@ -1,0 +1,185 @@
+You are a senior Electron + React + Python architect.
+
+This is a production-grade desktop application project.
+
+PROJECT NAME: Lecture Lyft
+
+GOAL:
+Wrap an existing full-stack app (React + FastAPI) into a native Electron desktop app.
+
+IMPORTANT:
+
+* Do NOT rewrite frontend or backend
+* Only wrap and integrate them
+* Focus on production-quality code
+
+---
+
+TECH STACK:
+
+Frontend:
+
+* React 18
+* TypeScript
+* Vite
+* Tailwind CSS
+* Framer Motion
+* Zustand
+* Axios
+* React Router v6
+
+Backend:
+
+* FastAPI (Python 3.10+)
+* faster-whisper
+* Groq API
+* LangChain + LangGraph
+* MongoDB Atlas
+* WebSockets
+
+---
+
+CORE FEATURES:
+
+* Real-time transcription
+* AI Q&A
+* Summarization
+* Quiz generation
+* Terminology extraction
+
+---
+
+PROJECT STRUCTURE:
+
+lecture-lyft/
+├── electron/
+│   ├── main.ts
+│   ├── preload.ts
+│   ├── backend-manager.ts
+│   ├── tray-manager.ts
+│   ├── window-manager.ts
+│   ├── ipc-handlers.ts
+│   ├── auto-updater.ts
+│   ├── menu-builder.ts
+│   └── utils/
+│       ├── paths.ts
+│       └── logger.ts
+│
+├── webapp/
+│   └── src/electron/
+│       ├── useElectron.ts
+│       └── ipc.ts
+│
+├── backend/
+├── resources/
+├── electron-builder.yml
+├── tsconfig.electron.json
+├── package.json
+
+---
+
+ELECTRON REQUIREMENTS:
+
+* Start FastAPI backend as child process
+* Wait for backend health before opening UI
+* Load React app via BrowserWindow
+* Use preload + contextBridge (no nodeIntegration)
+* Enable sandbox mode
+* Handle app lifecycle correctly (macOS vs Windows/Linux)
+
+---
+
+WINDOW REQUIREMENTS:
+
+* macOS: traffic lights, vibrancy
+* Windows: acrylic blur, custom title bar
+* Restore window state
+* Show only after ready-to-show
+
+---
+
+BACKEND MANAGER:
+
+* Dev: spawn python
+* Prod: spawn compiled binary
+* Health check polling
+* Restart on crash (once)
+* Clean shutdown (SIGTERM → SIGKILL)
+
+---
+
+PRELOAD:
+
+* Expose safe APIs only
+* Use contextBridge
+
+---
+
+IPC:
+
+* File dialogs
+* Notifications
+* Window controls
+* Store access
+* Tray updates
+
+---
+
+SYSTEM TRAY:
+
+* Idle / Recording / Processing states
+* Animated icon during recording
+* Context menu
+* Click focuses window
+
+---
+
+MENU:
+
+* Native menu
+* Keyboard shortcuts
+* Communicate via IPC
+
+---
+
+AUTO UPDATER:
+
+* electron-updater
+* GitHub releases
+* Notify renderer
+
+---
+
+MIC PERMISSION:
+
+* macOS: request via systemPreferences
+* Show dialog if denied
+
+---
+
+PERFORMANCE:
+
+* Launch < 4 seconds
+* Memory < 300MB (renderer)
+* GPU acceleration ON
+
+---
+
+DEFINITION OF DONE:
+
+* npm run dev works fully
+* npm run dist builds installers
+* Backend lifecycle handled correctly
+* Tray + notifications + updater work
+* Splash screen during backend boot
+* All features functional
+
+---
+
+IMPORTANT CODING RULES:
+
+* Use TypeScript for Electron
+* Production-ready code only
+* No placeholders
+* No explanations unless asked
+

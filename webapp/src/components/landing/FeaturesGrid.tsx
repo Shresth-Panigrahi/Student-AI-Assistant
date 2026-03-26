@@ -1,8 +1,14 @@
-import React from 'react';
+import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { Mic, Globe, WifiOff, FileText, Search, MessageSquare, ArrowRight } from 'lucide-react';
 
-const FeatureCard = ({ className, children, delay = 0 }) => (
+type FeatureCardProps = {
+    className?: string;
+    children: ReactNode;
+    delay?: number;
+};
+
+const FeatureCard = ({ className = '', children, delay = 0 }: FeatureCardProps) => (
     <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}

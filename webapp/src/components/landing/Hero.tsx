@@ -1,11 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion';
 import { Mic, Play, ArrowDown, Mouse } from 'lucide-react';
-import gsap from 'gsap';
 
 const Hero = () => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const textRef = useRef<HTMLHeadingElement>(null);
     const [typingPhase, setTypingPhase] = useState(0); // 0-3: phases, 4: final
 
     const { scrollY } = useScroll();
@@ -82,7 +80,7 @@ const Hero = () => {
                 <div className="absolute bottom-1/4 left-1/2 w-[500px] h-[500px] bg-orchid/10 rounded-full blur-[80px] animate-float [animation-delay:4s]" />
 
                 {/* Grain Overlay */}
-                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-[0.03]" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.05)_1px,transparent_0)] bg-[length:18px_18px] opacity-[0.04]" />
             </div>
 
             {/* Main Content */}
@@ -143,7 +141,7 @@ const Hero = () => {
                     className="flex flex-col md:flex-row gap-6"
                 >
                     <button
-                        onClick={() => window.location.href = '/session'}
+                        onClick={() => { window.location.hash = '/session' }}
                         className="group relative w-full md:w-auto flex items-center gap-4 px-8 py-4 rounded-3xl bg-royal-purple/10 border border-royal-purple/20 hover:bg-royal-purple/20 transition-all duration-300"
                     >
                         <div className="p-3 bg-gradient-to-br from-royal-purple to-deep-magenta rounded-xl group-hover:scale-110 transition-transform">

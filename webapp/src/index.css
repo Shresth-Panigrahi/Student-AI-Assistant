@@ -16,9 +16,21 @@ body {
   min-height: 100vh;
 }
 
+body.electron-app {
+  overflow-y: auto;
+}
+
 #root {
   min-height: 100vh;
   background: #000000;
+}
+
+.desktop-drag {
+  -webkit-app-region: drag;
+}
+
+.desktop-no-drag {
+  -webkit-app-region: no-drag;
 }
 
 ::-webkit-scrollbar {

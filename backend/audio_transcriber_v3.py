@@ -13,7 +13,7 @@ What's new in V3 vs V2:
     - compute_word_diff() helper for animated word-level corrections in the UI.
 
 Model Options:
-    - whisper-large-v3-turbo (default)
+    - whisper-medium (default)
     - whisper-large-v3
     - paraformer
 
@@ -52,7 +52,7 @@ load_dotenv()
 # Optional dependency imports
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL = os.getenv("TRANSCRIBER_MODEL", "whisper-large-v3-turbo")
+DEFAULT_MODEL = os.getenv("TRANSCRIBER_MODEL", "whisper-medium")
 
 WHISPER_AVAILABLE = False
 _model = None
@@ -509,7 +509,7 @@ class AudioTranscriberV3:
         elif "paraformer" in self.model_name.lower():
             self._load_paraformer()
         else:
-            self.model_name = "whisper-large-v3-turbo"
+            self.model_name = "whisper-medium"
             self._load_whisper()
 
     def _load_whisper(self):
@@ -525,7 +525,7 @@ class AudioTranscriberV3:
                 "whisper-medium":         "medium",
                 "whisper-small":          "small",
             }
-            model_size = model_map.get(self.model_name, "large-v3-turbo")
+            model_size = model_map.get(self.model_name, "medium")
             compute    = "float16" if self.device == "cuda" else "int8"
             print(f"🔄 Loading {model_size} on {self.device}…")
             try:
@@ -844,7 +844,7 @@ def get_transcriber_v3() -> AudioTranscriberV3:
     """Get or create the V3 transcriber instance (singleton)."""
     global _transcriber_v3
     if _transcriber_v3 is None:
-        model  = os.getenv("TRANSCRIBER_MODEL", "whisper-large-v3-turbo")
+        model  = os.getenv("TRANSCRIBER_MODEL", "whisper-medium")
         device = os.getenv("TRANSCRIBER_DEVICE", "cuda")
         _transcriber_v3 = AudioTranscriberV3(model_name=model, device=device)
     return _transcriber_v3

@@ -28,6 +28,7 @@ ENV/
 env.bak/
 venv.bak/
 backend/venv/
+backend/venv_whisperx/
 
 # Environment Variables
 .env
@@ -69,6 +70,12 @@ dist/
 dist-ssr/
 build/
 *.local
+dist-electron/
+release/
+resources/backend-dist/
+resources/icons/*.png
+resources/icons/*.ico
+resources/icons/*.icns
 
 # Testing
 coverage/

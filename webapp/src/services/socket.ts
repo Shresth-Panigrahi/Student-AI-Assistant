@@ -1,9 +1,15 @@
+import { electronIpc } from '@/electron/ipc'
+
 class WebSocketService {
   private ws: WebSocket | null = null
   private listeners: Map<string, Set<Function>> = new Map()
 
   connect() {
-    this.ws = new WebSocket('ws://localhost:8000/ws')
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      return this.ws
+    }
+
+    this.ws = new WebSocket(electronIpc.backendWsUrl())
 
     this.ws.onopen = () => {
       console.log('✅ WebSocket connected')
