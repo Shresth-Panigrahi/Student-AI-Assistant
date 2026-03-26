@@ -562,40 +562,45 @@ async def manual_transcribe(text: str):
 @app.post("/api/transcribe/upload")
 @limiter.limit("5/minute")
 async def upload_and_transcribe(request: Request, file: UploadFile = File(...)):
-    """Upload an audio file and get the full transcript"""
-    # Check if Whisper is available
     if not is_whisper_available():
-        return {"success": False, "message": "Whisper not available. Install with: pip install faster-whisper"}
+        return {"success": False, "message": "Whisper not available."}
 
-    # Validate file type
     allowed_extensions = {'.mp3', '.wav', '.m4a', '.flac', '.ogg', '.webm', '.wma'}
     file_ext = os.path.splitext(file.filename)[1].lower()
     if file_ext not in allowed_extensions:
-        return {
-            "success": False,
-            "message": f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}"
-        }
+        return {"success": False, "message": f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}"}
 
-    # Save uploaded file to temp location
     temp_dir = tempfile.gettempdir()
     temp_path = os.path.join(temp_dir, f"upload_{int(datetime.now().timestamp())}_{file.filename}")
 
     try:
-        # Write uploaded file to temp location
         content = await file.read()
         with open(temp_path, "wb") as f:
             f.write(content)
 
         print(f"📂 Received file: {file.filename} ({len(content)} bytes)")
 
-        # Run transcription in thread pool
+        # FIX 1 — use a dedicated executor so exceptions aren't swallowed
+        import concurrent.futures
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, transcribe_file, temp_path)
+
+        try:
+            # FIX 2 — explicit timeout (10 minutes); adjust to your longest lecture
+            result = await asyncio.wait_for(
+                loop.run_in_executor(executor, transcribe_file, temp_path),
+                timeout=600.0
+            )
+        except asyncio.TimeoutError:
+            print("❌ Transcription timed out after 10 minutes")
+            return {"success": False, "message": "Transcription timed out. Try a shorter file."}
+        finally:
+            executor.shutdown(wait=False)
 
         if result.get("error"):
             return {"success": False, "message": result["error"]}
 
-        # Store transcript in current session
         current_session["transcript"] = result["transcript"]
 
         return {
@@ -613,13 +618,11 @@ async def upload_and_transcribe(request: Request, file: UploadFile = File(...)):
         return {"success": False, "message": f"Error processing file: {str(e)}"}
 
     finally:
-        # Cleanup temp file
         if os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
             except:
                 pass
-
 # Authentication endpoints
 def hash_password(password: str) -> str:
     """Hash password using SHA-256"""
