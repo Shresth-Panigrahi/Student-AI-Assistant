@@ -71,39 +71,40 @@ def _split_by_silence(
     min_silence_len_ms: int = 2000,
     keep_padding_ms: int = 500,
 ) -> List[Dict[str, Any]]:
-    """Split audio by natural silence boundaries."""
+    """
+    Split audio by natural silence boundaries using detect_nonsilent so that
+    start_ms / end_ms reflect the *real* position inside the original file.
+    """
     from pydub import AudioSegment
-    from pydub.silence import split_on_silence
+    from pydub.silence import detect_nonsilent
 
     audio = AudioSegment.from_file(audio_path)
-    total_len = len(audio)
+    total_len = len(audio)  # ms
 
-    chunks = split_on_silence(
+    # Get actual speech ranges [start_ms, end_ms] within the original timeline
+    nonsilent_ranges = detect_nonsilent(
         audio,
         min_silence_len=min_silence_len_ms,
         silence_thresh=silence_thresh_db,
-        keep_silence=keep_padding_ms,
     )
 
-    if not chunks:
+    if not nonsilent_ranges:
         return [{'path': audio_path, 'start_ms': 0, 'end_ms': total_len}]
 
     result = []
-    current_pos = 0
+    for (seg_start, seg_end) in nonsilent_ranges:
+        # Add padding while clamping to valid range
+        padded_start = max(0, seg_start - keep_padding_ms)
+        padded_end   = min(total_len, seg_end + keep_padding_ms)
 
-    for i, chunk in enumerate(chunks):
-        start_ms = current_pos
-        end_ms = start_ms + len(chunk)
-
+        chunk = audio[padded_start:padded_end]
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
             chunk.export(tmp.name, format='wav')
             result.append({
-                'path': tmp.name,
-                'start_ms': start_ms,
-                'end_ms': end_ms,
+                'path':     tmp.name,
+                'start_ms': padded_start,
+                'end_ms':   padded_end,
             })
-
-        current_pos = end_ms
 
     return result
 
@@ -234,8 +235,13 @@ def _transcribe_chunk(
     log_prob_threshold: float,
     temperature,
     initial_prompt: Optional[str],
-) -> tuple[List[str], Any, int]:
-    """Transcribe a single audio chunk."""
+) -> tuple[List[str], Any, int, List[tuple]]:
+    """Transcribe a single audio chunk.
+
+    Returns:
+        (parts, info, rejected_count, rejected_ranges)
+        rejected_ranges: list of (start_s, end_s) for each rejected segment
+    """
     segments_iter, info = model.transcribe(
         audio_path,
         language="en",
@@ -252,22 +258,24 @@ def _transcribe_chunk(
             min_silence_duration_ms=400,
             speech_pad_ms=150,
             min_speech_duration_ms=600,
-            max_speech_duration_s=28.0,
+            max_speech_duration_s=60.0,
         ),
     )
 
     parts = []
     rejected = 0
+    rejected_ranges: List[tuple] = []   # (start_s, end_s) relative to this chunk
     for seg in segments_iter:
         text = seg.text.strip()
         if not text:
             continue
         if seg.no_speech_prob > no_speech_threshold:
             rejected += 1
+            rejected_ranges.append((seg.start, seg.end))
             continue
         parts.append(text)
 
-    return parts, info, rejected
+    return parts, info, rejected, rejected_ranges
 
 
 # ------------------------------------------------------------------------------
@@ -342,15 +350,17 @@ def transcribe_file(file_path: str, model_name: Optional[str] = None) -> Dict[st
     log(f"[+] Split into {len(chunks)} natural chunks")
 
     # Process chunks
-    all_parts = []
+    all_parts: List[Dict] = []
     total_rejected = 0
+    temp_files_to_cleanup: List[str] = [c['path'] for c in chunks if c['path'] != file_path]
+    rejected_absolute_ranges: List[tuple] = []  # (start_ms, end_ms) in original audio
 
     for i, chunk in enumerate(chunks):
         chunk_duration_ms = chunk['end_ms'] - chunk['start_ms']
         log(f"\n[*] Processing chunk {i+1}/{len(chunks)} ({chunk_duration_ms:.0f}ms)")
 
         # Pass 1: aggressive
-        parts1, info, rejected1 = _transcribe_chunk(
+        parts1, info, rejected1, rranges1 = _transcribe_chunk(
             model,
             chunk['path'],
             no_speech_threshold=0.80,
@@ -372,7 +382,7 @@ def transcribe_file(file_path: str, model_name: Optional[str] = None) -> Dict[st
         # Pass 2 if needed (tighter thresholds to avoid hallucination)
         if ratio < MIN_CHARS_RATIO and not _is_hallucinated_chunk(raw1):
             log(f"    Pass 1 yield low ({ratio:.2f}), trying Pass 2...")
-            parts2, _, rejected2 = _transcribe_chunk(
+            parts2, _, rejected2, rranges2 = _transcribe_chunk(
                 model,
                 chunk['path'],
                 no_speech_threshold=0.70,
@@ -385,21 +395,148 @@ def transcribe_file(file_path: str, model_name: Optional[str] = None) -> Dict[st
             if len(raw2) > len(raw1) and not _is_hallucinated_chunk(raw2):
                 raw = raw2
                 rejected = rejected2
+                rranges = rranges2
             else:
                 raw = raw1
                 rejected = rejected1
+                rranges = rranges1
         else:
             raw = raw1
             rejected = rejected1
+            rranges = rranges1
+
+        start_sec = chunk['start_ms'] / 1000.0
+        end_sec = chunk['end_ms'] / 1000.0
+        dur_sec = chunk_duration_ms / 1000.0
+        log(f"    [Chunk {i+1} Info] Processed {start_sec:.2f}s to {end_sec:.2f}s (duration: {dur_sec:.2f}s)")
+        log(f"    [Chunk {i+1} Transcription]: {raw if raw else '<empty>'}")
 
         all_parts.append({
-            'text': raw,
+            'text':     raw,
             'start_ms': chunk['start_ms'],
-            'end_ms': chunk['end_ms'],
+            'end_ms':   chunk['end_ms'],
         })
         total_rejected += rejected
 
         log(f"    [+] {len(raw)} chars, {rejected} rejected segments")
+
+        # Accumulate rejected segment ranges as ABSOLUTE milliseconds
+        chunk_offset_ms = chunk['start_ms']
+        for (rs, re) in rranges:
+            abs_start_ms = chunk_offset_ms + int(rs * 1000)
+            abs_end_ms   = chunk_offset_ms + int(re * 1000)
+            if abs_end_ms - abs_start_ms >= 300:   # skip tiny sub-300ms blips
+                rejected_absolute_ranges.append((abs_start_ms, abs_end_ms))
+
+    # ------------------------------------------------------------------
+    # Gap-fill pass: find uncovered audio regions and transcribe them
+    # ------------------------------------------------------------------
+    GAP_FILL_MIN_MS = 1000   # only fill gaps >= 1 second
+    covered: List[tuple] = sorted(
+        [(p['start_ms'], p['end_ms']) for p in all_parts if p['text']]
+    )
+
+    # Build list of uncovered ranges
+    total_ms = int(total_duration_s * 1000)
+    uncovered: List[tuple] = []
+    cursor = 0
+    for (seg_start, seg_end) in covered:
+        if seg_start - cursor >= GAP_FILL_MIN_MS:
+            uncovered.append((cursor, seg_start))
+        cursor = max(cursor, seg_end)
+    if total_ms - cursor >= GAP_FILL_MIN_MS:
+        uncovered.append((cursor, total_ms))
+
+    if uncovered:
+        log(f"\n[*] Gap-fill: {len(uncovered)} uncovered region(s) found")
+        try:
+            from pydub import AudioSegment as _AS
+            _full_audio = _AS.from_file(file_path)
+
+            for gap_idx, (g_start, g_end) in enumerate(uncovered):
+                gap_dur_ms = g_end - g_start
+                log(f"    [Gap {gap_idx+1}] {g_start/1000:.2f}s – {g_end/1000:.2f}s "
+                    f"({gap_dur_ms:.0f}ms) – transcribing...")
+
+                gap_audio = _full_audio[g_start:g_end]
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as gtmp:
+                    gap_audio.export(gtmp.name, format='wav')
+                    gtmp_path = gtmp.name
+                temp_files_to_cleanup.append(gtmp_path)
+
+                gparts, _, grejected, _ = _transcribe_chunk(
+                    model,
+                    gtmp_path,
+                    no_speech_threshold=0.65,
+                    log_prob_threshold=-2.0,
+                    temperature=[0.0, 0.2],
+                    initial_prompt=None,
+                )
+                graw = " ".join(gparts).strip()
+
+                if graw and not _is_hallucinated_chunk(graw):
+                    log(f"    [Gap {gap_idx+1}] Recovered {len(graw)} chars")
+                    all_parts.append({
+                        'text':     graw,
+                        'start_ms': g_start,
+                        'end_ms':   g_end,
+                    })
+                    total_rejected += grejected
+                else:
+                    log(f"    [Gap {gap_idx+1}] No speech found (or hallucination)")
+        except Exception as gap_err:
+            log(f"    [!] Gap-fill error: {gap_err}")
+    else:
+        log("\n[*] Gap-fill: no significant gaps detected")
+
+    # ------------------------------------------------------------------
+    # Rejected-segment recovery pass
+    # ------------------------------------------------------------------
+    # Some segments inside a covered chunk were dropped because no_speech_prob
+    # exceeded the threshold.  Re-transcribe each such window with a very
+    # permissive threshold (0.95) so only truly silent frames are skipped.
+    if rejected_absolute_ranges:
+        log(f"\n[*] Rejected-segment recovery: {len(rejected_absolute_ranges)} segment(s)")
+        try:
+            from pydub import AudioSegment as _AS2
+            _full2 = _AS2.from_file(file_path)
+
+            for ri, (rs_ms, re_ms) in enumerate(rejected_absolute_ranges):
+                dur_ms = re_ms - rs_ms
+                log(f"    [Seg {ri+1}] {rs_ms/1000:.2f}s – {re_ms/1000:.2f}s ({dur_ms}ms)")
+
+                seg_audio = _full2[rs_ms:re_ms]
+                with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as stmp:
+                    seg_audio.export(stmp.name, format='wav')
+                    stmp_path = stmp.name
+                temp_files_to_cleanup.append(stmp_path)
+
+                sparts, _, srejected, _ = _transcribe_chunk(
+                    model,
+                    stmp_path,
+                    no_speech_threshold=0.95,   # very permissive: accept almost everything
+                    log_prob_threshold=-2.5,
+                    temperature=[0.0, 0.2],
+                    initial_prompt=None,
+                )
+                sraw = " ".join(sparts).strip()
+
+                if sraw and not _is_hallucinated_chunk(sraw):
+                    log(f"    [Seg {ri+1}] Recovered {len(sraw)} chars")
+                    all_parts.append({
+                        'text':     sraw,
+                        'start_ms': rs_ms,
+                        'end_ms':   re_ms,
+                    })
+                else:
+                    log(f"    [Seg {ri+1}] Still no usable speech")
+        except Exception as seg_err:
+            log(f"    [!] Rejected-segment recovery error: {seg_err}")
+    else:
+        log("\n[*] Rejected-segment recovery: nothing to recover")
+
+    # Sort all_parts chronologically before merging
+    all_parts.sort(key=lambda p: p['start_ms'])
 
     # Merge chunks
     log("\n[*] Merging chunks...")
@@ -420,10 +557,10 @@ def transcribe_file(file_path: str, model_name: Optional[str] = None) -> Dict[st
         log(f"    Chars/sec: {len(clean)/max(total_duration_s, 1):.2f}")
 
     # Cleanup temp files
-    for chunk in chunks:
-        if os.path.exists(chunk['path']) and chunk['path'] != file_path:
+    for tmp_path in temp_files_to_cleanup:
+        if os.path.exists(tmp_path):
             try:
-                os.unlink(chunk['path'])
+                os.unlink(tmp_path)
             except:
                 pass
 
