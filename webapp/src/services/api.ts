@@ -57,7 +57,7 @@ export const api = {
     return response.data
   },
 
-  // Analysis
+  // Analysis (existing)
   summarizeTranscript: async (sessionId: string) => {
     const response = await axios.post(`${API_BASE}/analyze/summarize`, { sessionId })
     return response.data
@@ -70,6 +70,32 @@ export const api = {
 
   generateQA: async (sessionId: string) => {
     const response = await axios.post(`${API_BASE}/analyze/qa`, { sessionId })
+    return response.data
+  },
+
+  // Chat Studio Features
+  generateLectureReport: async (session_id: string, context_files: any[] = [], force_regenerate: boolean = false) => {
+    const response = await axios.post(`${API_BASE}/chat/lecture-report`, { session_id, context_files, force_regenerate })
+    return response.data
+  },
+
+  generateFlashcards: async (session_id: string, context_files: any[] = [], count: number = 15, force_regenerate: boolean = false) => {
+    const response = await axios.post(`${API_BASE}/chat/flashcards`, { session_id, context_files, count, force_regenerate })
+    return response.data
+  },
+
+  generateQAAnalysis: async (session_id: string, context_files: any[] = [], count: number = 10, force_regenerate: boolean = false) => {
+    const response = await axios.post(`${API_BASE}/chat/qa-analysis`, { session_id, context_files, count, force_regenerate })
+    return response.data
+  },
+
+  generateAudioOverview: async (session_id: string, context_files: any[] = []) => {
+    const response = await axios.post(`${API_BASE}/chat/audio-overview`, { session_id, context_files })
+    return response.data
+  },
+
+  checkAudioOverview: async (session_id: string) => {
+    const response = await axios.get(`${API_BASE}/chat/audio-overview/${session_id}`)
     return response.data
   },
 

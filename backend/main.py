@@ -1,5 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
@@ -44,6 +45,8 @@ from qa_chatbot import get_chatbot, is_ollama_available
 from summarizer import summarize_transcript as lc_summarize
 from terminology_extractor import extract_terminologies as lc_extract_terms
 from qa_generator import generate_qa as lc_generate_qa
+from flashcard_generator import generate_flashcards
+from audio_overview import generate_audio_overview, check_podcast_exists, PODCASTS_DIR
 
 app = FastAPI(title="Lecture Lyft API")
 
@@ -85,6 +88,27 @@ class SaveSessionRequest(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     sessionId: str
+
+class ChatLectureReportRequest(BaseModel):
+    session_id: str
+    context_files: List[Dict[str, Any]] = []
+    force_regenerate: bool = False
+
+class ChatFlashcardsRequest(BaseModel):
+    session_id: str
+    context_files: List[Dict[str, Any]] = []
+    count: int = 15
+    force_regenerate: bool = False
+
+class ChatQAAnalysisRequest(BaseModel):
+    session_id: str
+    context_files: List[Dict[str, Any]] = []
+    count: int = 10
+    force_regenerate: bool = False
+
+class ChatAudioOverviewRequest(BaseModel):
+    session_id: str
+    context_files: List[Dict[str, Any]] = []
 
 class SignupRequest(BaseModel):
     name: str
@@ -532,6 +556,243 @@ async def generate_qa(request: Request, body: AnalyzeRequest):
         traceback.print_exc()
         return {"success": False, "message": f"Failed: {str(e)}"}
 
+# ============================================================
+# Chat Feature Endpoints
+# ============================================================
+
+@app.post("/api/chat/lecture-report")
+@limiter.limit("5/minute")
+async def chat_lecture_report(request: Request, body: ChatLectureReportRequest):
+    """Generate or return cached lecture report"""
+    session = db.get_session_by_id(body.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    transcript = session.get("transcript", "")
+    if not transcript or len(transcript.strip()) < 50:
+        return {"success": False, "message": "Transcript too short to generate report"}
+    
+    # Return cached if available
+    if session.get("summary") and not body.force_regenerate:
+        return {"success": True, "report": session["summary"], "from_cache": True}
+    
+    # Build context from uploaded files
+    context_text = ""
+    if body.context_files:
+        for cf in body.context_files:
+            context_text += f"\n--- {cf.get('name', 'file')} ---\n{cf.get('content_base64', cf.get('content', ''))}\n"
+    
+    try:
+        system_prompt = "You are an expert academic assistant. Generate a comprehensive lecture report strictly based on the provided transcript and any context files. Do not invent information not present in the sources."
+        
+        context_section = ""
+        if context_text.strip():
+            context_section = f"\nAlso incorporate insights from these additional context files:\n{context_text}"
+        
+        user_prompt = f"""Generate a detailed lecture report from the following transcript.{context_section}
+
+Transcript:
+{transcript}
+
+Format the report in exactly these markdown sections with these exact headings:
+## \U0001f4cb Overview
+A 3-4 sentence high-level summary of what this lecture covers.
+
+## \U0001f9e0 Key Concepts
+List and explain the 4-8 most important concepts covered. For each: bold the concept name, then explain it in 2-3 sentences.
+
+## \U0001f4cc Important Details
+Bullet points of specific facts, formulas, definitions, or details that students must remember. Be precise and include exact values/formulas where present in the transcript.
+
+## \U0001f517 Connections & Applications
+How the concepts relate to each other and real-world applications mentioned.
+
+## \U0001f3af Study Focus
+What a student should prioritize studying from this lecture. List 3-5 specific things.
+
+Be thorough but concise. Total length: 500-900 words. Use only information explicitly present in the transcript."""
+        
+        loop = asyncio.get_event_loop()
+        
+        def _generate():
+            if not _groq_client:
+                return None
+            completion = _groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                model="moonshotai/kimi-k2-instruct-0905",
+                temperature=0.3
+            )
+            return completion.choices[0].message.content.strip()
+        
+        report = await loop.run_in_executor(None, _generate)
+        
+        if not report:
+            return {"success": False, "message": "Failed to generate report. Groq client not available."}
+        
+        # Save to DB
+        db.update_session_summary(body.session_id, report)
+        
+        return {"success": True, "report": report, "from_cache": False}
+        
+    except Exception as e:
+        print(f"\u274c Lecture report error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "message": f"Failed to generate report: {str(e)}"}
+
+
+@app.post("/api/chat/flashcards")
+@limiter.limit("5/minute")
+async def chat_flashcards(request: Request, body: ChatFlashcardsRequest):
+    """Generate or return cached flashcards"""
+    session = db.get_session_by_id(body.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    transcript = session.get("transcript", "")
+    if not transcript or len(transcript.strip()) < 50:
+        return {"success": False, "message": "Transcript too short to generate flashcards"}
+    
+    # Return cached if available
+    if session.get("flashcards") and not body.force_regenerate:
+        return {"success": True, "flashcards": session["flashcards"], "count": len(session["flashcards"]), "from_cache": True}
+    
+    # Build context
+    context_text = ""
+    if body.context_files:
+        for cf in body.context_files:
+            context_text += f"\n--- {cf.get('name', 'file')} ---\n{cf.get('content_base64', cf.get('content', ''))}\n"
+    
+    try:
+        loop = asyncio.get_event_loop()
+        flashcards = await loop.run_in_executor(None, generate_flashcards, transcript, context_text, body.count)
+        
+        if not flashcards:
+            return {"success": False, "message": "Failed to generate flashcards"}
+        
+        # Save to DB
+        db.update_session_flashcards(body.session_id, flashcards)
+        
+        return {"success": True, "flashcards": flashcards, "count": len(flashcards), "from_cache": False}
+        
+    except Exception as e:
+        print(f"\u274c Flashcard error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "message": f"Failed to generate flashcards: {str(e)}"}
+
+
+@app.post("/api/chat/qa-analysis")
+@limiter.limit("5/minute")
+async def chat_qa_analysis(request: Request, body: ChatQAAnalysisRequest):
+    """Generate or return cached Q&A analysis"""
+    session = db.get_session_by_id(body.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    transcript = session.get("transcript", "")
+    if not transcript or len(transcript.strip()) < 50:
+        return {"success": False, "message": "Transcript too short to generate Q&A"}
+    
+    # Return cached if available
+    if session.get("qa_analysis") and not body.force_regenerate:
+        return {"success": True, "questions": session["qa_analysis"], "from_cache": True}
+    
+    # Build context
+    context_text = ""
+    if body.context_files:
+        for cf in body.context_files:
+            context_text += f"\n--- {cf.get('name', 'file')} ---\n{cf.get('content_base64', cf.get('content', ''))}\n"
+    
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, lc_generate_qa, transcript, context_text, body.count)
+        
+        if result["error"]:
+            return {"success": False, "message": result["error"]}
+        
+        questions = result["qa_pairs"]
+        
+        if len(questions) < 1:
+            return {"success": False, "message": "Could not generate enough questions. Please try again."}
+        
+        # Save to DB
+        db.update_session_qa_analysis(body.session_id, questions)
+        
+        return {"success": True, "questions": questions, "from_cache": False}
+        
+    except Exception as e:
+        print(f"\u274c Q&A analysis error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "message": f"Failed to generate Q&A: {str(e)}"}
+
+
+@app.post("/api/chat/audio-overview")
+@limiter.limit("2/minute")
+async def chat_audio_overview(request: Request, body: ChatAudioOverviewRequest):
+    """Generate audio overview podcast"""
+    session = db.get_session_by_id(body.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    transcript = session.get("transcript", "")
+    if not transcript or len(transcript.strip()) < 50:
+        return {"success": False, "message": "Transcript too short to generate audio"}
+    
+    # Build context
+    context_text = ""
+    if body.context_files:
+        for cf in body.context_files:
+            context_text += f"\n--- {cf.get('name', 'file')} ---\n{cf.get('content_base64', cf.get('content', ''))}\n"
+    
+    try:
+        result = await generate_audio_overview(
+            session_id=body.session_id,
+            transcript=transcript,
+            session_title=session.get("name", "Lecture"),
+            context_files_text=context_text
+        )
+        
+        if result.get("error"):
+            return {"success": False, "message": result["error"]}
+        
+        return {
+            "success": True,
+            "audio_url": result["audio_url"],
+            "captions_url": result.get("captions_url"),
+            "script": result["script"],
+            "duration_seconds": result["duration_seconds"]
+        }
+        
+    except Exception as e:
+        print(f"\u274c Audio overview error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "message": f"Failed to generate audio: {str(e)}"}
+
+
+@app.get("/api/chat/audio-overview/{session_id}")
+async def check_audio_overview(session_id: str):
+    """Check if a podcast already exists for a session"""
+    result = check_podcast_exists(session_id)
+    return result
+
+
+@app.get("/api/audio/{filename}")
+async def stream_audio(filename: str):
+    """Stream an audio file"""
+    filepath = os.path.join(PODCASTS_DIR, filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Audio file not found")
+    
+    media_type = 'audio/mpeg' if filename.endswith('.mp3') else 'audio/wav'
+    return FileResponse(filepath, media_type=media_type, filename=filename)
+
+
 # WebSocket endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -700,6 +961,8 @@ async def login(request: Request, body: LoginRequest):
     }
 
 if __name__ == "__main__":
+    # Ensure podcasts directory exists
+    os.makedirs(PODCASTS_DIR, exist_ok=True)
     print("🚀 Starting AI Student Assistant API on http://localhost:8000")
     print("📚 API Documentation: http://localhost:8000/docs")
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

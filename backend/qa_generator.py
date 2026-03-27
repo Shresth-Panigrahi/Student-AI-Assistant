@@ -1,6 +1,6 @@
 """
 Q&A Generator using LangChain + LangGraph
-Generates Short and Long answer questions based on transcript depth.
+Generates exam-style questions with difficulty and type classifications.
 """
 import os
 import json
@@ -19,46 +19,39 @@ load_dotenv()
 # ============================================================
 class QAGeneratorState(TypedDict):
     transcript: str
-    qa_pairs: list          # List of {type, question, answer} dicts
+    context: str
+    count: int
+    qa_pairs: list          # List of {question, answer, difficulty, type} dicts
     error: str
 
 
 # ============================================================
-# Prompt (Modified for Content Depth Analysis)
+# Prompt — Exam-style questions with difficulty and type
 # ============================================================
-# We structure the prompt to act as a "Teacher" deciding the exam difficulty
 QA_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """You are an expert educational content generator. 
-Your task is to create a quiz based on the provided lecture transcript.
+    ("system", """You are an expert professor generating exam-style questions for university students. Generate questions strictly from the provided lecture transcript. Every question must be answerable using only information in the transcript. Do not invent information."""),
+    ("human", """Generate exactly {count} Q&A pairs from this lecture transcript. 
 
-ANALYSIS INSTRUCTIONS:
-1. Analyze the transcript for depth and detail.
-2. If the content is detailed/rich: Generate a mix of 'short_answer' and 'long_answer' questions.
-3. If the content is superficial or brief: Stick strictly to 'short_answer' questions.
+Rules:
+- Questions must be exam-worthy: test understanding, not just recall
+- Each answer must be 2 to 4 sentences, precise, complete, and self-contained
+- Mix question types: some definitional ("What is X"), some explanatory ("Why does Y"), some comparative ("How does A differ from B"), some applied ("In what scenario would you use X")
+- Do not generate yes/no questions
+- Questions must be specific, not vague
 
-QUESTION TYPES:
-- "short_answer": Recall-based or simple concept checks. Answer length: 1-2 sentences.
-- "long_answer": Synthesis, explanation of processes, or 'how/why' scenarios. Answer length: 3-5 sentences.
-
-RULES:
-1. Generate between 5 to 7 questions total.
-2. Ensure answers are strictly derived from the text provided.
-3. Return ONLY a valid JSON array.
-
-OUTPUT FORMAT (JSON array only):
+Respond ONLY with valid JSON array, no markdown, no extra text:
 [
   {{
-    "type": "short_answer",
-    "question": "What is the primary function of the CPU?", 
-    "answer": "The CPU executes instructions and processes data."
-  }},
-  {{
-    "type": "long_answer",
-    "question": "Explain the fetch-decode-execute cycle.", 
-    "answer": "First, the CPU fetches the instruction from memory. Next, the control unit decodes what the instruction means. Finally, the ALU executes the command and stores the result."
+    "question": "Full question here?",
+    "answer": "Complete 2-4 sentence answer here.",
+    "difficulty": "easy|medium|hard",
+    "type": "definition|explanation|comparison|application"
   }}
-]"""),
-    ("human", "Generate quiz questions based on this transcript:\n\n{transcript}\n\nJSON ARRAY:")
+]
+
+Transcript:
+{transcript}
+{context}""")
 ])
 
 
@@ -68,15 +61,24 @@ OUTPUT FORMAT (JSON array only):
 def generate_questions_node(state: QAGeneratorState) -> dict:
     """Generate Q&A pairs from transcript"""
     try:
-        # Using a slightly higher temperature to encourage better long-form synthesis
         llm = ChatGroq(
             model="moonshotai/kimi-k2-instruct-0905",
             temperature=0.3,
             api_key=os.getenv("GROQ_API_KEY")
         )
         
+        context_section = ""
+        if state.get("context") and state["context"].strip():
+            context_section = f"\nAdditional context:\n{state['context']}"
+        
+        count = state.get("count", 10)
+        
         chain = QA_PROMPT | llm
-        result = chain.invoke({"transcript": state["transcript"]})
+        result = chain.invoke({
+            "transcript": state["transcript"],
+            "count": count,
+            "context": context_section
+        })
         
         raw = result.content.strip()
         print(f"📝 Raw Q&A response: {raw[:300]}...")
@@ -113,19 +115,19 @@ def _parse_qa_json(text: str) -> list:
         # Validate structure
         valid_pairs = []
         for item in qa_list:
-            # We now check for 'type' as well, defaulting to 'short_answer' if missing
             if isinstance(item, dict) and "question" in item and "answer" in item:
                 valid_pairs.append({
-                    "type": item.get("type", "short_answer"),
                     "question": item["question"].strip(),
-                    "answer": item["answer"].strip()
+                    "answer": item["answer"].strip(),
+                    "difficulty": item.get("difficulty", "medium").strip().lower(),
+                    "type": item.get("type", "explanation").strip().lower(),
                 })
         
         return valid_pairs
         
     except (json.JSONDecodeError, Exception) as e:
         print(f"❌ JSON Q&A parsing error: {e}")
-        return [] # Return empty on failure for safety
+        return []
 
 
 # ============================================================
@@ -158,12 +160,14 @@ def get_qa_graph():
 # ============================================================
 # Public API
 # ============================================================
-def generate_qa(transcript: str) -> dict:
+def generate_qa(transcript: str, context: str = "", count: int = 10) -> dict:
     """
     Generate Q&A pairs from a transcript.
     
     Args:
         transcript: The lecture transcript text
+        context: Additional context from files
+        count: Number of Q&A pairs to generate
         
     Returns:
         dict with 'qa_pairs' and 'error' keys
@@ -176,6 +180,8 @@ def generate_qa(transcript: str) -> dict:
     graph = get_qa_graph()
     result = graph.invoke({
         "transcript": transcript,
+        "context": context,
+        "count": count,
         "qa_pairs": [],
         "error": ""
     })

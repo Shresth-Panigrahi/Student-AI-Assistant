@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, FileText, Sparkles, BookOpen, Loader, Eye, EyeOff } from 'lucide-react'
+import { ArrowLeft, Sparkles, BookOpen, Loader } from 'lucide-react'
 import { api } from '@/services/api'
 import { Session } from '@/store/useStore'
 import { format } from 'date-fns'
@@ -11,9 +11,8 @@ export default function TranscriptDetail() {
   const navigate = useNavigate()
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
-  const [analyzing, setAnalyzing] = useState<'summary' | 'terms' | 'qa' | null>(null)
-  const [activeTab, setActiveTab] = useState<'transcript' | 'summary' | 'terms' | 'qa'>('transcript')
-  const [visibleAnswers, setVisibleAnswers] = useState<Set<number>>(new Set())
+  const [analyzing, setAnalyzing] = useState<'summary' | 'terms' | null>(null)
+  const [activeTab, setActiveTab] = useState<'transcript' | 'summary' | 'terms'>('transcript')
 
   useEffect(() => {
     loadSession()
@@ -56,33 +55,6 @@ export default function TranscriptDetail() {
     } finally {
       setAnalyzing(null)
     }
-  }
-
-  const handleGenerateQA = async () => {
-    if (!id) return
-    setAnalyzing('qa')
-    try {
-      const result = await api.generateQA(id)
-      setSession((prev) => prev ? { ...prev, qa: result.qa } : null)
-      setActiveTab('qa')
-      setVisibleAnswers(new Set()) // Hide all answers initially
-    } catch (error) {
-      console.error('Failed to generate Q&A:', error)
-    } finally {
-      setAnalyzing(null)
-    }
-  }
-
-  const toggleAnswer = (index: number) => {
-    setVisibleAnswers((prev) => {
-      const newSet = new Set(prev)
-      if (newSet.has(index)) {
-        newSet.delete(index)
-      } else {
-        newSet.add(index)
-      }
-      return newSet
-    })
   }
 
   if (loading) {
@@ -136,18 +108,18 @@ export default function TranscriptDetail() {
             animate={{ x: 0, opacity: 1 }}
             className="lg:col-span-2 glass-effect rounded-2xl p-6"
           >
-            {/* Tabs */}
+            {/* Tabs — Transcript, Summary, Terminologies only */}
             <div className="flex gap-2 mb-6 border-b border-dark-500 flex-wrap">
-              {['transcript', 'summary', 'terms', 'qa'].map((tab) => (
+              {(['transcript', 'summary', 'terms'] as const).map((tab) => (
                 <button
                   key={tab}
-                  onClick={() => setActiveTab(tab as any)}
+                  onClick={() => setActiveTab(tab)}
                   className={`px-4 py-2 font-medium capitalize transition-colors relative ${activeTab === tab
                     ? 'text-accent-blue'
                     : 'text-gray-400 hover:text-gray-300'
                     }`}
                 >
-                  {tab === 'terms' ? 'Terminologies' : tab === 'qa' ? 'Q&A' : tab}
+                  {tab === 'terms' ? 'Terminologies' : tab}
                   {activeTab === tab && (
                     <motion.div
                       layoutId="activeTab"
@@ -159,7 +131,7 @@ export default function TranscriptDetail() {
               
               {/* Chat Entry Route Tab */}
               <button
-                onClick={() => navigate(`/chat/${session.id}`, { state: { session } })}
+                onClick={() => navigate(`/chat/${session.id}`)}
                 className="px-4 py-2 font-medium transition-colors relative flex items-center gap-2 text-gray-400 hover:text-royal-purple sm:ml-auto group"
               >
                 <Sparkles className="w-4 h-4 text-royal-purple group-hover:animate-pulse" />
@@ -278,73 +250,10 @@ export default function TranscriptDetail() {
                   )}
                 </motion.div>
               )}
-
-              {activeTab === 'qa' && (
-                <motion.div
-                  key="qa"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="bg-dark-800 rounded-xl p-6 max-h-[600px] overflow-y-auto"
-                >
-                  {session.qa && session.qa.length > 0 ? (
-                    <div className="space-y-6">
-                      {session.qa.map((item: any, index: number) => (
-                        <motion.div
-                          key={index}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.1 }}
-                          className="border border-dark-500 rounded-lg p-4"
-                        >
-                          <div className="flex items-start justify-between gap-2 mb-3">
-                            <div className="flex items-start gap-2 flex-1">
-                              <span className="text-red-500 font-bold text-sm">Q{index + 1}:</span>
-                              <p className="text-white font-medium">{item.question}</p>
-                            </div>
-                            <button
-                              onClick={() => toggleAnswer(index)}
-                              className="p-2 hover:bg-dark-600 rounded-lg transition-colors"
-                              title={visibleAnswers.has(index) ? "Hide answer" : "Show answer"}
-                            >
-                              {visibleAnswers.has(index) ? (
-                                <EyeOff className="w-5 h-5 text-gray-400" />
-                              ) : (
-                                <Eye className="w-5 h-5 text-accent-blue" />
-                              )}
-                            </button>
-                          </div>
-                          <AnimatePresence>
-                            {visibleAnswers.has(index) && (
-                              <motion.div
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: 'auto' }}
-                                exit={{ opacity: 0, height: 0 }}
-                                className="flex items-start gap-2 pl-6 overflow-hidden"
-                              >
-                                <span className="text-green-500 font-bold text-sm">A:</span>
-                                <p className="text-gray-300 text-sm">{item.answer}</p>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </motion.div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-12">
-                      <FileText className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-                      <p className="text-gray-400">No Q&A generated yet</p>
-                      <p className="text-sm text-gray-500 mt-2">
-                        Click "Generate Q&A" to create practice questions
-                      </p>
-                    </div>
-                  )}
-                </motion.div>
-              )}
             </AnimatePresence>
           </motion.div>
 
-          {/* Actions Panel */}
+          {/* Actions Panel — Simplified */}
           <motion.div
             initial={{ x: 20, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
@@ -353,6 +262,7 @@ export default function TranscriptDetail() {
             <h2 className="text-xl font-semibold mb-6">Analysis Tools</h2>
 
             <div className="space-y-4">
+              {/* Summary Button */}
               <motion.button
                 whileHover={{ scale: session.summary ? 1 : 1.02 }}
                 whileTap={{ scale: session.summary ? 1 : 0.98 }}
@@ -378,6 +288,7 @@ export default function TranscriptDetail() {
                 )}
               </motion.button>
 
+              {/* Extract Terms Button */}
               <motion.button
                 whileHover={{ scale: (session.terminologies && Object.keys(session.terminologies).length > 0) ? 1 : 1.02 }}
                 whileTap={{ scale: (session.terminologies && Object.keys(session.terminologies).length > 0) ? 1 : 0.98 }}
@@ -402,31 +313,6 @@ export default function TranscriptDetail() {
                   </>
                 )}
               </motion.button>
-
-              <motion.button
-                whileHover={{ scale: (session.qa && session.qa.length > 0) ? 1 : 1.02 }}
-                whileTap={{ scale: (session.qa && session.qa.length > 0) ? 1 : 0.98 }}
-                onClick={handleGenerateQA}
-                disabled={analyzing === 'qa' || (!!session.qa && session.qa.length > 0)}
-                className="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-4 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors"
-              >
-                {analyzing === 'qa' ? (
-                  <>
-                    <Loader className="w-5 h-5 animate-spin" />
-                    Generating...
-                  </>
-                ) : (session.qa && session.qa.length > 0) ? (
-                  <>
-                    <FileText className="w-5 h-5" />
-                    ✓ Q&A Generated
-                  </>
-                ) : (
-                  <>
-                    <FileText className="w-5 h-5" />
-                    Generate Q&A
-                  </>
-                )}
-              </motion.button>
             </div>
 
             {/* Stats */}
@@ -439,28 +325,20 @@ export default function TranscriptDetail() {
                 <span className="text-gray-400">Chat Messages</span>
                 <span className="font-semibold">{session.chat?.length || 0}</span>
               </div>
-              {session.summary && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Summary</span>
-                  <span className="text-accent-green font-semibold">✓ Generated</span>
-                </div>
-              )}
-              {session.terminologies && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Terms Extracted</span>
-                  <span className="text-accent-green font-semibold">
-                    {Object.keys(session.terminologies).length}
-                  </span>
-                </div>
-              )}
-              {session.qa && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-400">Q&A Generated</span>
-                  <span className="text-red-500 font-semibold">
-                    {session.qa.length} questions
-                  </span>
-                </div>
-              )}
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Summary</span>
+                <span className={`font-semibold ${session.summary ? 'text-accent-green' : 'text-gray-500'}`}>
+                  {session.summary ? '✓ Generated' : '—'}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">Terms Extracted</span>
+                <span className={`font-semibold ${session.terminologies && Object.keys(session.terminologies).length > 0 ? 'text-accent-green' : 'text-gray-500'}`}>
+                  {session.terminologies && Object.keys(session.terminologies).length > 0
+                    ? Object.keys(session.terminologies).length
+                    : '—'}
+                </span>
+              </div>
             </div>
           </motion.div>
         </div>

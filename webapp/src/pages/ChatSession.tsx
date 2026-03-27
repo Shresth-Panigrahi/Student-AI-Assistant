@@ -1,953 +1,1153 @@
-import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, Sparkles, MessageSquare, Paperclip, X, UploadCloud, Headphones, FileText, Layers, HelpCircle, Search, RefreshCcw, File as FileIcon, Image as ImageIcon } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { useStore, Session, Message } from '@/store/useStore'
+import {
+  ArrowLeft, Sparkles, ChevronRight, ChevronDown, ChevronUp, ChevronLeft,
+  Headphones, FileText, Layers, HelpCircle, GitFork, Lock, Plus, X,
+  RefreshCw, Download, Play, Pause, Trophy
+} from 'lucide-react'
 import { api } from '@/services/api'
+import { format } from 'date-fns'
 import axios from 'axios'
 
-import * as pdfjsLib from 'pdfjs-dist'
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+// ─── Types ───────────────────────────────────────────────────
+interface SessionData {
+  id: string
+  name: string
+  timestamp: string
+  transcript: string
+  summary?: string
+  terminologies?: Record<string, any>
+  chat?: any[]
+}
 
-// Subcomponents will be defined below or kept in line for now depending on size
+interface Flashcard {
+  question: string
+  answer: string
+  category: string
+}
+
+interface QAItem {
+  question: string
+  answer: string
+  difficulty: string
+  type: string
+}
+
+interface ContextFile {
+  name: string
+  size: number
+  content_base64: string
+  type: string
+}
+
+interface CaptionSegment {
+  id: number
+  speaker: 'HOST_A' | 'HOST_B'
+  text: string
+  startTime: number
+  endTime: number
+}
+
+type ActiveFeature = null | 'audio' | 'report' | 'flashcards' | 'qa'
+
+// ─── Component ───────────────────────────────────────────────
 export default function ChatSession() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const navigate = useNavigate()
-  const location = useLocation()
-  const { sessions } = useStore()
 
-  // Try to get session from router state, fallback to store lookup
-  const sessionData = (location.state?.session as Session | undefined) || sessions.find((s: Session) => s.id === sessionId)
-  const [session] = useState<Session | null>(sessionData || null)
-  
-  // State
-  const [time, setTime] = useState(new Date())
-  const [showTranscriptDrawer, setShowTranscriptDrawer] = useState(false)
-  const [transcriptSearch, setTranscriptSearch] = useState('')
-  const [messages, setMessages] = useState<Message[]>(session?.chat || [])
-  const [inputValue, setInputValue] = useState('')
-  const [isTyping, setIsTyping] = useState(false)
-  const [errorMsg, setErrorMsg] = useState('')
-  const [files, setFiles] = useState<{name: string, content: string, size: number}[]>([])
-  const [showDropzone, setShowDropzone] = useState(false)
-  const [isDraggingOver, setIsDraggingOver] = useState(false)
-  
-  // Right Panel States
-  const [showReport, setShowReport] = useState(false)
-  const [reportContent, setReportContent] = useState<string | null>(null)
-  const [isGeneratingReport, setIsGeneratingReport] = useState(false)
+  // Session
+  const [session, setSession] = useState<SessionData | null>(null)
+  const [sessionLoading, setSessionLoading] = useState(true)
 
-  const [showQA, setShowQA] = useState(false)
-  const [qaContent, setQaContent] = useState<string | null>(null)
-  const [isGeneratingQA, setIsGeneratingQA] = useState(false)
+  // Feature
+  const [activeFeature, setActiveFeature] = useState<ActiveFeature>(null)
 
-  const [showFlashcards, setShowFlashcards] = useState(false)
-  const [flashcards, setFlashcards] = useState<{q: string, a: string}[]>([])
-  const [flashcardIndex, setFlashcardIndex] = useState(0)
-  const [isFlipped, setIsFlipped] = useState(false)
-  
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const abortControllerRef = useRef<AbortController | null>(null)
+  // Context files
+  const [contextFiles, setContextFiles] = useState<ContextFile[]>([])
+  const [contextOpen, setContextOpen] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const pdfInputRef = useRef<HTMLInputElement>(null)
-  const wordInputRef = useRef<HTMLInputElement>(null)
-  const imageInputRef = useRef<HTMLInputElement>(null)
 
-  // Auto-scroll to bottom of messages
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+  // Lecture Report
+  const [report, setReport] = useState<string | null>(null)
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportFromCache, setReportFromCache] = useState(false)
+  const [reportError, setReportError] = useState<string | null>(null)
 
+  // Flash Cards
+  const [flashcards, setFlashcards] = useState<Flashcard[]>([])
+  const [flashcardsLoading, setFlashcardsLoading] = useState(false)
+  const [currentCardIndex, setCurrentCardIndex] = useState(0)
+  const [flipped, setFlipped] = useState(false)
+  const [scores, setScores] = useState({ correct: 0, wrong: 0 })
+  const [cardResults, setCardResults] = useState<Record<number, 'correct' | 'wrong' | null>>({})
+  const [flashcardsComplete, setFlashcardsComplete] = useState(false)
+
+  // Q&A Analysis
+  const [qaQuestions, setQaQuestions] = useState<QAItem[]>([])
+  const [qaLoading, setQaLoading] = useState(false)
+  const [expandedQA, setExpandedQA] = useState<number | null>(null)
+
+  // Audio Overview
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [captionsUrl, setCaptionsUrl] = useState<string | null>(null)
+  const [audioLoading, setAudioLoading] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [genStep, setGenStep] = useState('')
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [playbackRate, setPlaybackRate] = useState(1)
+  const [audioError, setAudioError] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  // Captions — fetched from backend (real timestamps)
+  const [captions, setCaptions] = useState<CaptionSegment[]>([])
+  const [activeCaptionId, setActiveCaptionId] = useState<number | null>(null)
+  const captionsRef = useRef<CaptionSegment[]>([])
+
+  // ─── Load Session ────────────────────────────────────────────
   useEffect(() => {
-    scrollToBottom()
-  }, [messages, isTyping])
-
-  useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000)
-    return () => clearInterval(timer)
-  }, [])
-
-  // Cleanup abort controller
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
+    if (!sessionId) return
+    const load = async () => {
+      try {
+        const data = await api.getSession(sessionId)
+        setSession(data.session)
+      } catch (e) {
+        console.error('Failed to load session:', e)
+      } finally {
+        setSessionLoading(false)
       }
     }
-  }, [])
+    load()
+  }, [sessionId])
 
-  const handleSend = async (messageText = inputValue) => {
-    if (!messageText.trim() || !session) return
-    
-    const userMsg: Message = { role: 'user', content: messageText.trim(), timestamp: new Date() }
-    setMessages(prev => [...prev, userMsg])
-    setInputValue('')
-    setIsTyping(true)
-    setErrorMsg('')
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-    }
-    abortControllerRef.current = new AbortController()
-
+  // ─── Fetch captions from backend ──────────────────────────
+  const fetchCaptions = useCallback(async (url: string) => {
     try {
-      const allFilesContent = files.map(f => `--- FILE: ${f.name} ---\n${f.content}\n`).join('\n')
-      const augmentedTranscript = session.transcript + (allFilesContent ? `\n\n--- ADDITIONAL CONTEXT ---\n${allFilesContent}` : '')
-
-      const response = await api.askQuestion(augmentedTranscript + '\n\nUSER QUESTION: ' + messageText, false)
-      const aiMsg: Message = { role: 'ai', content: response.answer, timestamp: new Date() }
-      setMessages(prev => [...prev, aiMsg])
-    } catch (error: any) {
-      if (axios.isCancel(error)) return
-      setErrorMsg('Failed to fetch response. Please try again.')
-    } finally {
-      setIsTyping(false)
-    }
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      handleSend()
-    }
-  }
-
-  const extractPdfText = async (file: File) => {
-    try {
-      const arrayBuffer = await file.arrayBuffer()
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-      let fullText = ''
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i)
-        const textContent = await page.getTextContent()
-        fullText += textContent.items.map((item: any) => item.str).join(' ') + '\n'
-      }
-      return fullText
+      const res = await axios.get(`http://localhost:8000${url}`)
+      const caps: CaptionSegment[] = res.data
+      setCaptions(caps)
+      captionsRef.current = caps
+      console.log(`✅ Loaded ${caps.length} real captions from backend`)
     } catch (e) {
-      console.error('PDF extraction failed', e)
-      return ''
+      console.error('Failed to fetch captions:', e)
     }
-  }
+  }, [])
 
-  const handleFiles = async (newFiles: FileList | File[]) => {
-    for (const file of Array.from(newFiles)) {
-      if (file.type === 'text/plain') {
-        const content = await file.text()
-        setFiles(prev => [...prev, { name: file.name, content, size: file.size }])
-      } else if (file.type === 'application/pdf') {
-        const content = await extractPdfText(file)
-        if (content) {
-          setFiles(prev => [...prev, { name: file.name, content, size: file.size }])
-        }
-      } else if (file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
-        // Mock parsing for DOCX for now
-        setFiles(prev => [...prev, { name: file.name, content: "[DOCX Content Placeholder]", size: file.size }])
-      } else if (file.type.startsWith('image/')) {
-        // Mock image metadata for now
-        setFiles(prev => [...prev, { name: file.name, content: "[Image Reference]", size: file.size }])
+  // ─── Audio element wiring ───────────────────────────────────
+  useEffect(() => {
+    if (!audioUrl) return
+    const audio = new Audio(`http://localhost:8000${audioUrl}`)
+    audioRef.current = audio
+
+    const onTime = () => {
+      setCurrentTime(audio.currentTime)
+      // Active caption tracking using real timestamps
+      const caps = captionsRef.current
+      const t = audio.currentTime
+      const active = caps.find(c => t >= c.startTime && t < c.endTime)
+      setActiveCaptionId(active ? active.id : null)
+    }
+    const onMeta = () => {
+      setDuration(audio.duration)
+    }
+    const onEnd = () => {
+      setIsPlaying(false)
+      setActiveCaptionId(null)
+    }
+
+    audio.addEventListener('timeupdate', onTime)
+    audio.addEventListener('loadedmetadata', onMeta)
+    audio.addEventListener('ended', onEnd)
+
+    return () => {
+      audio.removeEventListener('timeupdate', onTime)
+      audio.removeEventListener('loadedmetadata', onMeta)
+      audio.removeEventListener('ended', onEnd)
+      audio.pause()
+    }
+  }, [audioUrl])
+
+  // ─── Load captions when captionsUrl is set ──────────────────
+  useEffect(() => {
+    if (captionsUrl) fetchCaptions(captionsUrl)
+  }, [captionsUrl, fetchCaptions])
+
+  // ─── Feature triggers ──────────────────────────────────────
+  useEffect(() => {
+    if (activeFeature === 'report' && !report && !reportLoading) fetchReport()
+    if (activeFeature === 'flashcards' && flashcards.length === 0 && !flashcardsLoading) fetchFlashcards()
+    if (activeFeature === 'qa' && qaQuestions.length === 0 && !qaLoading) fetchQA()
+    if (activeFeature === 'audio' && !audioUrl && !generating && !audioLoading) checkAudio()
+  }, [activeFeature])
+
+  // ─── API Calls ──────────────────────────────────────────────
+  const fetchReport = async (force = false) => {
+    if (!sessionId) return
+    setReportLoading(true)
+    setReportError(null)
+    try {
+      const res = await api.generateLectureReport(sessionId, contextFiles, force)
+      if (res.success) {
+        setReport(res.report)
+        setReportFromCache(!!res.from_cache)
+      } else {
+        setReportError(res.message || 'Failed to generate report')
       }
+    } catch (e: any) {
+      setReportError(e.message || 'Network error')
+    } finally {
+      setReportLoading(false)
     }
-    setShowDropzone(false)
-    setIsDraggingOver(false)
   }
 
-  const highlightText = (text: string, highlight: string) => {
-    if (!highlight.trim()) return <span>{text}</span>
-    const parts = text.split(new RegExp(`(${highlight})`, 'gi'))
+  const fetchFlashcards = async (force = false) => {
+    if (!sessionId) return
+    setFlashcardsLoading(true)
+    try {
+      const res = await api.generateFlashcards(sessionId, contextFiles, 15, force)
+      if (res.success) {
+        setFlashcards(res.flashcards)
+        setCurrentCardIndex(0)
+        setFlipped(false)
+        setScores({ correct: 0, wrong: 0 })
+        setCardResults({})
+        setFlashcardsComplete(false)
+      }
+    } catch (e) {
+      console.error('Flashcards error:', e)
+    } finally {
+      setFlashcardsLoading(false)
+    }
+  }
+
+  const fetchQA = async (force = false) => {
+    if (!sessionId) return
+    setQaLoading(true)
+    try {
+      const res = await api.generateQAAnalysis(sessionId, contextFiles, 10, force)
+      if (res.success) {
+        setQaQuestions(res.questions)
+        setExpandedQA(null)
+      }
+    } catch (e) {
+      console.error('Q&A error:', e)
+    } finally {
+      setQaLoading(false)
+    }
+  }
+
+  const checkAudio = async () => {
+    if (!sessionId) return
+    setAudioLoading(true)
+    try {
+      const res = await api.checkAudioOverview(sessionId)
+      if (res.exists && res.audio_url) {
+        setAudioUrl(res.audio_url)
+        if (res.captions_url) setCaptionsUrl(res.captions_url)
+      }
+    } catch (e) {
+      console.error('Audio check error:', e)
+    } finally {
+      setAudioLoading(false)
+    }
+  }
+
+  const generatePodcast = async () => {
+    if (!sessionId) return
+    setGenerating(true)
+    setAudioError(null)
+
+    const steps = ['Analyzing transcript...', 'Writing podcast script...', 'Synthesizing Host A voice...', 'Synthesizing Host B voice...', 'Mixing audio tracks...', 'Finalizing podcast...']
+    let stepIdx = 0
+    setGenStep(steps[0])
+    const interval = setInterval(() => {
+      stepIdx = (stepIdx + 1) % steps.length
+      setGenStep(steps[stepIdx])
+    }, 3000)
+
+    try {
+      const res = await api.generateAudioOverview(sessionId, contextFiles)
+      if (res.success) {
+        setAudioUrl(res.audio_url)
+        setDuration(res.duration_seconds)
+        if (res.captions_url) setCaptionsUrl(res.captions_url)
+      } else {
+        setAudioError(res.message || 'Failed to generate audio')
+      }
+    } catch (e: any) {
+      setAudioError(e.message || 'Network error')
+    } finally {
+      clearInterval(interval)
+      setGenerating(false)
+    }
+  }
+
+  // ─── File handling ─────────────────────────────────────────
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    if (contextFiles.length + files.length > 3) return
+
+    Array.from(files).forEach(file => {
+      const reader = new FileReader()
+      reader.onload = (ev) => {
+        const base64 = (ev.target?.result as string).split(',')[1] || ''
+        setContextFiles(prev => [...prev, {
+          name: file.name,
+          size: file.size,
+          content_base64: base64,
+          type: file.type
+        }])
+      }
+      reader.readAsDataURL(file)
+    })
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // ─── Flashcard helpers ─────────────────────────────────────
+  const handleCardResult = useCallback((result: 'correct' | 'wrong') => {
+    setScores(prev => ({
+      ...prev,
+      [result === 'correct' ? 'correct' : 'wrong']: prev[result === 'correct' ? 'correct' : 'wrong'] + 1
+    }))
+    setCardResults(prev => ({ ...prev, [currentCardIndex]: result }))
+
+    const allDone = Object.keys(cardResults).length + 1 >= flashcards.length
+    setTimeout(() => {
+      if (allDone) {
+        setFlashcardsComplete(true)
+      } else if (currentCardIndex < flashcards.length - 1) {
+        setCurrentCardIndex(prev => prev + 1)
+        setFlipped(false)
+      } else {
+        setFlashcardsComplete(true)
+      }
+    }, 300)
+  }, [currentCardIndex, flashcards.length, cardResults])
+
+  // ─── Helpers ───────────────────────────────────────────────
+  const wordCount = session?.transcript?.split(' ').length || 0
+  const fmtTime = (s: number) => {
+    const m = Math.floor(s / 60)
+    const sec = Math.floor(s % 60)
+    return `${m}:${sec.toString().padStart(2, '0')}`
+  }
+  const fmtSize = (b: number) => `${(b / 1024).toFixed(0)} KB`
+
+  // ─── Render: Loading ───────────────────────────────────────
+  if (sessionLoading) {
     return (
-      <span>
-        {parts.map((p: string, i: number) => 
-          p.toLowerCase() === highlight.toLowerCase() ? 
-          <mark key={i} className="bg-royal-purple/50 text-white rounded px-0.5">{p}</mark> : p
-        )}
-      </span>
+      <div className="h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
+      </div>
     )
   }
-
-  const handleGenerateReport = async () => {
-    if (!session) return
-    setShowReport(true)
-    if (reportContent) return
-    setIsGeneratingReport(true)
-    try {
-      const res = await api.summarizeTranscript(session.id!)
-      setReportContent(res.summary || res.content || (typeof res === 'string' ? res : JSON.stringify(res, null, 2)))
-    } catch {
-      setReportContent("Failed to generate report.")
-    } finally {
-      setIsGeneratingReport(false)
-    }
-  }
-
-  const handleGenerateQA = async (openFlashcards = false) => {
-    if (!session) return
-    if (openFlashcards) setShowFlashcards(true)
-    else setShowQA(true)
-    
-    if (qaContent) return
-    setIsGeneratingQA(true)
-    try {
-      const res = await api.generateQA(session.id!)
-      const text = res.qa || res.content || (typeof res === 'string' ? res : JSON.stringify(res, null, 2))
-      setQaContent(text)
-      
-      // Attempt rudimentary parsing of Q&A for flashcards
-      const parsed: {q: string, a: string}[] = []
-      const lines = text.split('\n').map((l: string) => l.trim()).filter(Boolean)
-      let currentQ = ''
-      for (const line of lines) {
-        if (line.toLowerCase().startsWith('q:') || line.toLowerCase().startsWith('question')) {
-          currentQ = line.replace(/^(Q:|Question\s*\d*:?)\s*/i, '')
-        } else if (line.toLowerCase().startsWith('a:') || line.toLowerCase().startsWith('answer')) {
-          if (currentQ) {
-            parsed.push({ q: currentQ, a: line.replace(/^(A:|Answer\s*\d*:?)\s*/i, '') })
-            currentQ = ''
-          }
-        }
-      }
-      if (parsed.length === 0) {
-        // Fallback generic split
-        parsed.push({ q: "What is the main topic of this lecture?", a: "Review the full Q&A section for details." })
-      }
-      setFlashcards(parsed)
-    } catch {
-      setQaContent("Failed to generate Q&A.")
-      setFlashcards([{q: "Error", a: "Could not load flashcards."}])
-    } finally {
-      setIsGeneratingQA(false)
-    }
-  }
-
   if (!session) {
-    // If no session passed, we should ideally fetch it. For now, fallback to history.
     return (
-      <div className="min-h-screen bg-true-black flex items-center justify-center">
-        <div className="text-white">Session not found. Redirecting...</div>
+      <div className="h-screen bg-[#0a0a0a] flex items-center justify-center text-gray-400">
+        Session not found
       </div>
     )
   }
 
+  // ─── Feature Cards Data ────────────────────────────────────
+  const featureCards: {
+    id: ActiveFeature
+    icon: React.ReactNode
+    title: string
+    subtitle: string
+    badge?: { text: string; style: string }
+    disabled?: boolean
+  }[] = [
+    {
+      id: 'audio',
+      icon: <Headphones className="w-5 h-5 text-[#7c3aed]" />,
+      title: 'Audio Overview',
+      subtitle: 'AI podcast of this lecture',
+      badge: { text: 'BETA', style: 'bg-purple-900/40 text-purple-300' }
+    },
+    {
+      id: 'report',
+      icon: <FileText className="w-5 h-5 text-[#7c3aed]" />,
+      title: 'Lecture Report',
+      subtitle: 'Comprehensive written summary'
+    },
+    {
+      id: 'flashcards',
+      icon: <Layers className="w-5 h-5 text-[#7c3aed]" />,
+      title: 'Flash Cards',
+      subtitle: 'Interactive study deck'
+    },
+    {
+      id: 'qa',
+      icon: <HelpCircle className="w-5 h-5 text-[#7c3aed]" />,
+      title: 'Q&A Analysis',
+      subtitle: 'Expected exam questions'
+    },
+    {
+      id: null,
+      icon: <GitFork className="w-5 h-5 text-[#7c3aed] rotate-90" />,
+      title: 'Mindmap',
+      subtitle: 'Visual concept map',
+      badge: { text: 'NEXT UPDATE', style: 'bg-gray-800 text-gray-500' },
+      disabled: true
+    }
+  ]
+
+  // ─── RENDER ────────────────────────────────────────────────
   return (
-    <div className="h-screen bg-true-black text-white overflow-hidden relative font-sans selection:bg-royal-purple selection:text-white flex flex-col">
-      {/* Entrance Scanner Line */}
-      <motion.div
-        initial={{ left: '-100%' }}
-        animate={{ left: '100%' }}
-        transition={{ duration: 0.6, ease: 'linear' }}
-        className="absolute top-0 w-1/3 h-[2px] bg-gradient-to-r from-transparent via-royal-purple to-transparent z-50 pointer-events-none shadow-[0_0_15px_rgba(109,40,217,0.8)]"
-      />
-
-      {/* Page Header */}
-      <header className="h-12 border-b border-white/5 bg-[#0D0D12]/80 backdrop-blur-md flex items-center justify-between px-4 z-40 flex-shrink-0">
-        <div className="flex items-center gap-4 flex-1 min-w-0">
-          <button 
-            onClick={() => navigate('/history')}
-            className="p-1.5 -ml-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors group"
-          >
-            <motion.div whileHover={{ x: -4 }} transition={{ duration: 0.2 }}>
-              <ArrowLeft className="w-4 h-4" />
-            </motion.div>
-          </button>
-          <div className="h-4 w-[1px] bg-white/10" />
-          <h1 className="text-sm font-medium text-gray-300 truncate">
-            {session.name}
-          </h1>
-        </div>
-
-        <div className="flex items-center gap-4 flex-shrink-0">
-          <div className="text-xs font-medium text-gray-500 tracking-wider">
-            {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </div>
-          <div className="h-4 w-[1px] bg-white/10" />
-          <button className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-white/10 text-gray-300 hover:bg-white/5 hover:text-white transition-colors">
-            New Chat
-          </button>
-        </div>
-      </header>
-
-      {/* Main Two-Panel Layout */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative z-10 w-full h-[calc(100vh-3rem)]">
-        
-        {/* LEFT PANEL - CHAT INTERFACE */}
-        <motion.div 
-          initial={{ x: -30, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 120, delay: 0 }}
-          onDragOver={(e) => { e.preventDefault(); setIsDraggingOver(true) }}
-          onDragLeave={(e) => { e.preventDefault(); setIsDraggingOver(false) }}
-          onDrop={(e) => {
-            e.preventDefault()
-            handleFiles(e.dataTransfer.files)
-          }}
-          className={`flex-1 lg:w-[65%] flex flex-col relative bg-[#0D0D12] z-20 h-full border-b lg:border-b-0 border-white/5 transition-colors duration-300 ${isDraggingOver ? 'bg-royal-purple/10 border-royal-purple/50' : ''}`}
-        >
-          {/* Drag Overlay */}
-          <AnimatePresence>
-            {isDraggingOver && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="absolute inset-0 z-50 flex items-center justify-center bg-royal-purple/5 backdrop-blur-sm pointer-events-none"
-              >
-                <div className="absolute inset-4 border-2 border-dashed border-royal-purple/50 rounded-3xl" />
-                <div className="flex flex-col items-center gap-4">
-                  <UploadCloud className="w-16 h-16 text-royal-purple animate-bounce" />
-                  <p className="text-xl font-bold text-white shadow-black drop-shadow-lg">Drop files to add context</p>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Context Indicator Pill */}
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30">
-            <motion.div 
-              initial={{ scale: 0.8, opacity: 0, y: -20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              transition={{ type: 'spring', delay: 0.3 }}
-              className="group relative cursor-pointer"
-              onClick={() => setShowTranscriptDrawer(true)}
+    <div className="h-screen bg-[#0a0a0a] text-white overflow-hidden flex">
+      {/* ███ LEFT PANEL ███ */}
+      <div className="w-[380px] bg-[#111111] border-r border-white/5 flex flex-col overflow-y-auto shrink-0">
+        {/* Header */}
+        <div className="p-5 border-b border-white/5">
+          <div className="flex items-center gap-3 mb-1">
+            <button
+              onClick={() => navigate(`/transcript/${sessionId}`)}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all duration-200"
             >
-              {/* Shimmer background */}
-              <div 
-                className="absolute inset-0 rounded-full bg-gradient-to-r from-royal-purple/5 via-royal-purple/20 to-royal-purple/5 bg-[length:200%_auto] border border-royal-purple/20 backdrop-blur-md"
-                style={{ animation: 'shimmer 3s linear infinite' }}
-              />
-              <style>{`
-                @keyframes shimmer {
-                  0% { background-position: 0% center; }
-                  100% { background-position: -200% center; }
-                }
-                @keyframes pulse-dot {
-                  0%, 100% { transform: scale(1); opacity: 1; }
-                  50% { transform: scale(1.3); opacity: 0.6; }
-                }
-              `}</style>
-              
-              <div className="relative px-4 py-1.5 flex items-center gap-2">
-                <div 
-                  className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"
-                  style={{ animation: 'pulse-dot 2s ease-in-out infinite' }}
-                />
-                <span className="text-xs font-medium text-purple-100 flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 opacity-80" />
-                  <span className="max-w-[150px] truncate">{session.name}</span>
-                  <span className="opacity-60">· loaded as context</span>
-                </span>
-              </div>
-            </motion.div>
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <h1 className="text-sm font-bold text-white truncate flex-1">{session.name}</h1>
           </div>
+          <p className="text-xs text-gray-500 ml-9">
+            {format(new Date(session.timestamp), 'MMM dd, yyyy • HH:mm')}
+          </p>
+        </div>
 
-          <div className="flex-1 overflow-y-overlay px-6 pt-16 pb-32 flex flex-col custom-scrollbar">
-            {/* Transcript Drawer Overlay */}
-            <AnimatePresence>
-              {showTranscriptDrawer && (
-                <>
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    onClick={() => setShowTranscriptDrawer(false)}
-                    className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
-                  />
-                  <motion.div
-                    initial={{ x: '-100%' }}
-                    animate={{ x: 0 }}
-                    exit={{ x: '-100%' }}
-                    transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                    className="fixed left-0 top-0 bottom-0 w-full md:w-[400px] bg-[#111116] border-r border-white/5 z-50 flex flex-col shadow-2xl"
+        {/* Feature Cards */}
+        <div className="p-4 flex flex-col gap-3 flex-1">
+          {featureCards.map((card, i) => (
+            <div
+              key={i}
+              onClick={() => !card.disabled && card.id !== null && setActiveFeature(card.id)}
+              className={`
+                rounded-2xl bg-[#1a1a1a] border p-4 cursor-pointer transition-all duration-200
+                flex items-center gap-3
+                ${card.disabled ? 'opacity-40 cursor-not-allowed border-white/[0.08]' : ''}
+                ${!card.disabled && activeFeature === card.id
+                  ? 'border-purple-500/40 border-l-[3px] border-l-purple-600'
+                  : 'border-white/[0.08] hover:border-white/20 hover:bg-[#1f1f1f]'}
+              `}
+            >
+              <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center shrink-0">
+                {card.icon}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-white text-sm">{card.title}</span>
+                  {card.badge && (
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${card.badge.style}`}>
+                      {card.badge.text}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">{card.subtitle}</p>
+              </div>
+              {!card.disabled && <ChevronRight className="w-4 h-4 text-gray-600 shrink-0" />}
+            </div>
+          ))}
+
+          {/* ─── Context Files Panel ─── */}
+          <div className="mt-auto pt-4 border-t border-white/5">
+            <button
+              onClick={() => setContextOpen(p => !p)}
+              className="flex items-center justify-between w-full mb-3"
+            >
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Context</span>
+              {contextOpen ? <ChevronUp className="w-3 h-3 text-gray-500" /> : <ChevronDown className="w-3 h-3 text-gray-500" />}
+            </button>
+
+            {contextOpen && (
+              <div className="space-y-2">
+                {/* Primary source file (locked) */}
+                <div className="flex items-center gap-3 bg-[#1a1a1a] border border-white/[0.08] rounded-xl p-3">
+                  <FileText className="w-4 h-4 text-[#7c3aed] shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-white truncate">{session.name}</p>
+                    <p className="text-[10px] text-gray-500">{wordCount} words</p>
+                  </div>
+                  <Lock className="w-3 h-3 text-gray-600 shrink-0" />
+                </div>
+                <p className="text-[10px] text-purple-400 ml-1 -mt-1">Primary Source</p>
+
+                {/* Uploaded context files */}
+                {contextFiles.map((cf, i) => (
+                  <div key={i} className="flex items-center gap-3 bg-[#1a1a1a] border border-white/[0.08] rounded-xl p-3">
+                    <FileText className="w-4 h-4 text-gray-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-white truncate">{cf.name.slice(0, 20)}{cf.name.length > 20 ? '...' : ''}</p>
+                      <p className="text-[10px] text-gray-500">{fmtSize(cf.size)}</p>
+                    </div>
+                    <button onClick={() => setContextFiles(p => p.filter((_, j) => j !== i))} className="p-1 rounded hover:bg-white/10 text-gray-500 hover:text-white transition-all">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Add File */}
+                {contextFiles.length < 3 ? (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border border-dashed border-white/20 rounded-xl p-3 text-center text-xs text-gray-500 hover:border-purple-500/40 hover:text-gray-400 cursor-pointer transition-all"
                   >
-                    <div className="p-4 border-b border-white/5 flex items-center justify-between bg-[#1A1A24]/50">
-                      <h3 className="font-semibold text-white flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-royal-purple" />
-                        Full Transcript
-                      </h3>
-                      <button 
-                        onClick={() => setShowTranscriptDrawer(false)}
-                        className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                    
-                    <div className="p-4 border-b border-white/5">
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                        <input
-                          type="text"
-                          placeholder="Search in transcript..."
-                          value={transcriptSearch}
-                          onChange={(e) => setTranscriptSearch(e.target.value)}
-                          className="w-full bg-black/40 border border-white/10 rounded-xl py-2 pl-9 pr-4 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-royal-purple/50 focus:ring-1 focus:ring-royal-purple/50"
-                        />
-                      </div>
-                    </div>
-                    
-                    <div className="flex-1 overflow-y-overlay custom-scrollbar p-6">
-                      <div className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed font-sans">
-                        {highlightText(session.transcript, transcriptSearch)}
-                      </div>
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
+                    <Plus className="w-4 h-4 mx-auto mb-1" />
+                    Add File
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-gray-600 text-center">Max 3 context files</p>
+                )}
+                <input ref={fileInputRef} type="file" accept=".pdf,.txt,.md" multiple className="hidden" onChange={handleFileUpload} />
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
-            {/* Chat Messages */}
-            <AnimatePresence>
-              {messages.length === 0 ? (
-                <div className="m-auto flex flex-col items-center justify-center max-w-md w-full">
-                  <MessageSquare className="w-16 h-16 text-white opacity-[0.08] mb-6" />
-                  <h2 className="text-lg font-medium text-gray-300 mb-8">Ask anything about this lecture</h2>
-                  
-                  <div className="flex flex-col gap-3 w-full">
-                    {["Summarize the key points", "What topics were covered?", "Generate 5 quiz questions"].map((suggestion, idx) => (
-                      <motion.div
-                        key={idx}
-                        initial={{ opacity: 0, y: 15 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.4 + idx * 0.08 }}
-                      >
-                        <button 
-                          onClick={() => handleSend(suggestion)}
-                          className="w-full text-left px-4 py-3 bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 rounded-xl text-sm text-gray-400 hover:text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20"
-                        >
-                          {suggestion}
-                        </button>
-                      </motion.div>
+      {/* ███ RIGHT PANEL ███ */}
+      <div className="flex-1 overflow-hidden">
+        <AnimatePresence mode="wait">
+          {/* ─── Welcome State ─── */}
+          {activeFeature === null && (
+            <motion.div
+              key="welcome"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="h-full flex flex-col items-center justify-center gap-6 px-8"
+            >
+              <Sparkles className="w-16 h-16 text-[#7c3aed] opacity-80" />
+              <h2 className="text-2xl font-bold text-white text-center">{session.name}</h2>
+              <p className="text-sm text-gray-500">{wordCount} words in transcript</p>
+              <div className="flex flex-wrap gap-3 justify-center">
+                {(['audio', 'report', 'flashcards', 'qa'] as ActiveFeature[]).map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setActiveFeature(f)}
+                    className="px-4 py-2 rounded-full border border-purple-500/30 text-sm text-purple-300 hover:bg-purple-900/20 hover:border-purple-500/50 transition-all duration-200"
+                  >
+                    {f === 'audio' ? 'Audio Overview' : f === 'report' ? 'Lecture Report' : f === 'flashcards' ? 'Flash Cards' : 'Q&A Analysis'}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-600 mt-2">Select a feature to get started</p>
+            </motion.div>
+          )}
+
+          {/* ─── Lecture Report Panel ─── */}
+          {activeFeature === 'report' && (
+            <motion.div
+              key="report"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="h-full flex flex-col"
+            >
+              {/* Top bar */}
+              <div className="sticky top-0 bg-[#0a0a0a]/80 backdrop-blur-sm border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
+                <div className="flex items-center gap-3">
+                  <FileText className="w-5 h-5 text-[#7c3aed]" />
+                  <span className="font-bold text-white">Lecture Report</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {reportFromCache && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-800 text-gray-400">Cached</span>
+                  )}
+                  <button
+                    onClick={() => fetchReport(true)}
+                    disabled={reportLoading}
+                    className="flex items-center gap-1.5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:border-white/30 transition-all"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${reportLoading ? 'animate-spin' : ''}`} />
+                    Regenerate
+                  </button>
+                </div>
+              </div>
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto px-6 py-6">
+                {reportLoading ? (
+                  <div className="space-y-4">
+                    {[16, 12, 12, 16, 12, 12, 16].map((h, i) => (
+                      <div key={i} className={`animate-pulse bg-white/5 rounded-lg`} style={{ height: `${h}px` }} />
                     ))}
                   </div>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-6">
-                  {messages.map((msg, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`flex flex-col group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-                    >
-                      <div className={`
-                        max-w-[85%] md:max-w-[75%] p-4 rounded-2xl
-                        ${msg.role === 'user' 
-                          ? 'bg-gradient-to-br from-royal-purple to-deep-magenta text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)] rounded-tr-sm' 
-                          : 'bg-[#1A1A24] text-gray-200 border-l-[3px] border-royal-purple rounded-tl-sm'
-                        }
-                      `}>
-                        {msg.role === 'ai' ? (
-                          <div className="prose prose-invert prose-sm max-w-none ai-content overflow-x-hidden">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {msg.content}
-                            </ReactMarkdown>
+                ) : reportError ? (
+                  <div className="border border-red-500/30 bg-red-900/10 rounded-xl p-4">
+                    <p className="text-sm text-red-400">{reportError}</p>
+                    <button onClick={() => fetchReport(true)} className="mt-2 text-xs text-red-300 underline">
+                      Retry
+                    </button>
+                  </div>
+                ) : report ? (
+                  <div>
+                    {report.split('\n').map((line, i) => {
+                      const t = line.trim()
+                      if (!t) return <div key={i} className="h-2" />
+                      if (t.startsWith('## ')) {
+                        return (
+                          <div key={i}>
+                            {i > 0 && <div className="border-t border-white/5 my-4" />}
+                            <h2 className="text-lg font-semibold text-white mt-6 mb-3 flex items-center gap-2">{t.replace('## ', '')}</h2>
                           </div>
-                        ) : (
-                          <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
-                        )}
-                      </div>
-                      <div className="text-[10px] text-gray-500 mt-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </div>
-                    </motion.div>
-                  ))}
-                  
-                  {isTyping && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="flex items-start"
-                    >
-                      <div className="bg-[#1A1A24] border-l-[3px] border-royal-purple p-4 rounded-2xl rounded-tl-sm flex items-center gap-1.5 h-12">
-                        {[0, 1, 2].map((i) => (
-                          <motion.div
-                            key={i}
-                            animate={{ scale: [1, 1.5, 1], opacity: [0.4, 1, 0.4] }}
-                            transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
-                            className="w-1.5 h-1.5 bg-royal-purple rounded-full"
-                          />
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                  
-                  {errorMsg && (
-                    <div className="bg-rose/10 border border-rose/30 text-rose p-3 rounded-xl flex items-center justify-between text-sm max-w-[85%] self-start">
-                      <span>{errorMsg}</span>
-                      <button onClick={() => handleSend()} className="flex items-center gap-1 bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-xs ml-4 transition-colors">
-                        <RefreshCcw className="w-3 h-3" /> Retry
-                      </button>
-                    </div>
-                  )}
-                  <div ref={messagesEndRef} />
-                </div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Bottom Input Bar */}
-          <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-[#0D0D12] to-transparent pointer-events-none z-30">
-            {/* Uploaded Files Chips (above input) */}
-            <AnimatePresence>
-              {files.length > 0 && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  className="mx-auto max-w-3xl flex items-center gap-2 mb-2 pointer-events-auto overflow-x-auto custom-scrollbar pb-1"
-                >
-                  {files.map((file, idx) => (
-                    <motion.div 
-                      key={idx}
-                      layout
-                      initial={{ opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.8 }}
-                      className="flex-shrink-0 flex items-center gap-2 bg-[#1A1A24] border border-white/10 rounded-lg pl-3 pr-2 py-1.5"
-                    >
-                      <FileIcon className="w-3.5 h-3.5 text-royal-purple" />
-                      <span className="text-xs font-medium text-gray-300 max-w-[120px] truncate">{file.name}</span>
-                      <span className="text-[10px] text-gray-500">{(file.size / 1024).toFixed(0)}kb</span>
-                      <button 
-                        onClick={() => setFiles(prev => prev.filter((_, i) => i !== idx))}
-                        className="ml-1 p-0.5 rounded-md hover:bg-white/10 text-gray-500 hover:text-white transition-colors"
+                        )
+                      }
+                      if (t.startsWith('- ')) {
+                        const content = t.slice(2)
+                        const boldMatch = content.match(/^\*\*(.*?)\*\*(.*)/)
+                        return (
+                          <li key={i} className="text-gray-300 text-sm leading-relaxed ml-4 mb-1 list-disc">
+                            {boldMatch ? <><strong className="text-white">{boldMatch[1]}</strong>{boldMatch[2]}</> : content}
+                          </li>
+                        )
+                      }
+                      // inline bold
+                      const parts = t.split(/(\*\*.*?\*\*)/g)
+                      return (
+                        <p key={i} className="text-gray-300 text-sm leading-relaxed mb-2">
+                          {parts.map((p, j) => p.startsWith('**') && p.endsWith('**')
+                            ? <strong key={j} className="text-white">{p.slice(2, -2)}</strong>
+                            : <span key={j}>{p}</span>
+                          )}
+                        </p>
+                      )
+                    })}
+                    {/* Download */}
+                    <div className="mt-8">
+                      <button
+                        onClick={() => {
+                          const blob = new Blob([report], { type: 'text/plain' })
+                          const url = URL.createObjectURL(blob)
+                          const a = document.createElement('a')
+                          a.href = url
+                          a.download = `lecture-report-${session.name}.txt`
+                          a.click()
+                          URL.revokeObjectURL(url)
+                        }}
+                        className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-4 py-2 text-sm text-gray-400 flex items-center gap-2 transition-all"
                       >
-                        <X className="w-3 h-3" />
+                        <Download className="w-4 h-4" />
+                        Download Report
                       </button>
-                    </motion.div>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            {/* Dropzone Area (expandable) */}
-            <AnimatePresence>
-              {showDropzone && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 120, opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                  className="mx-auto max-w-3xl mb-2 pointer-events-auto overflow-hidden bg-[#141419]/90 backdrop-blur-xl rounded-2xl border border-white/10"
-                >
-                  <label className="flex flex-col items-center justify-center w-full h-full cursor-pointer hover:bg-white/5 transition-colors border-2 border-dashed border-transparent hover:border-royal-purple/30 m-2 rounded-xl" style={{ width: 'calc(100% - 16px)', height: 'calc(100% - 16px)' }}>
-                    <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                      <UploadCloud className="w-8 h-8 text-gray-400 mb-2" />
-                      <p className="text-sm text-gray-400 font-semibold mb-1"><span className="text-royal-purple">Click to upload</span> or drag and drop</p>
-                      <p className="text-xs text-gray-500">PDF, TXT, Word, Image</p>
                     </div>
-                    <input 
-                      ref={fileInputRef}
-                      type="file" 
-                      className="hidden" 
-                      multiple 
-                      accept=".txt,.pdf,.doc,.docx,image/*" 
-                      onChange={(e) => {
-                        if (e.target.files) handleFiles(e.target.files)
-                      }}
-                    />
-                  </label>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <div className={`mx-auto max-w-3xl border-t border-royal-purple/15 bg-[#141419]/90 backdrop-blur-xl rounded-2xl shadow-2xl p-2 flex items-end gap-2 pointer-events-auto transition-all duration-150 focus-within:shadow-[0_0_0_2px_rgba(109,40,217,0.3)] ${showDropzone ? 'shadow-[0_0_0_2px_rgba(109,40,217,0.3)]' : ''}`}>
-              <button 
-                onClick={() => setShowDropzone(!showDropzone)}
-                className="flex-shrink-0 w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-white transition-colors group"
-              >
-                <motion.div className="flex items-center justify-center" animate={{ rotate: showDropzone ? 45 : 0 }} transition={{ duration: 0.2 }}>
-                  <Paperclip className="w-4 h-4" />
-                </motion.div>
-              </button>
-              
-              <textarea 
-                rows={1}
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Enter your thoughts (Cmd+Enter to send)..."
-                className="flex-1 max-h-[120px] min-h-[40px] py-2 bg-transparent text-sm text-white placeholder-gray-500 focus:outline-none resize-none custom-scrollbar"
-                style={{ overflowY: 'overlay' as any }}
-              />
-              
-              <button 
-                onClick={() => handleSend()}
-                disabled={!inputValue.trim() || isTyping}
-                className="flex-shrink-0 w-9 h-9 rounded-xl bg-royal-purple disabled:opacity-50 disabled:bg-white/10 hover:bg-royal-purple/90 flex items-center justify-center text-white transition-colors relative overflow-hidden group"
-              >
-                <motion.div className="absolute inset-0 flex items-center justify-center" whileHover={{ x: '100%' }} transition={{ duration: 0.2 }}>
-                  <Sparkles className="w-4 h-4" />
-                </motion.div>
-                <motion.div className="absolute inset-0 flex items-center justify-center -translate-x-full group-hover:translate-x-0" transition={{ duration: 0.2 }}>
-                  <Sparkles className="w-4 h-4" />
-                </motion.div>
-              </button>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* GRADIENT DIVIDER */}
-        <div className="hidden lg:block w-[1px] h-full bg-gradient-to-b from-transparent via-royal-purple/20 to-transparent z-30 flex-shrink-0" />
-
-        {/* RIGHT PANEL - ACTIONS SIDEBAR */}
-        <motion.div 
-          initial={{ x: 30, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ type: 'spring', damping: 25, stiffness: 120, delay: 0.08 }}
-          className="lg:w-[35%] w-full bg-[#111116] z-20 h-full overflow-y-overlay custom-scrollbar p-6 flex flex-col gap-6"
-        >
-          {/* Uploaded Files Section */}
-          <div className="bg-white/5 border border-white/5 rounded-2xl overflow-hidden backdrop-blur-sm">
-            <div className="px-4 py-3 flex items-center justify-between border-b border-white/5">
-              <div className="flex items-center gap-2 text-sm font-semibold text-gray-300">
-                <Paperclip className="w-4 h-4 text-gray-500" />
-                Context Files
+                  </div>
+                ) : null}
               </div>
-              <AnimatePresence mode="popLayout">
-                <motion.div 
-                  key={files.length}
-                  initial={{ y: -10, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  className="px-2 py-0.5 rounded bg-white/10 text-xs font-bold font-mono text-gray-300"
+            </motion.div>
+          )}
+
+          {/* ─── Flash Cards Panel ─── */}
+          {activeFeature === 'flashcards' && (
+            <motion.div
+              key="flashcards"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="h-full flex flex-col"
+            >
+              {/* Top bar */}
+              <div className="sticky top-0 bg-[#0a0a0a]/80 backdrop-blur-sm border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
+                <div className="flex items-center gap-3">
+                  <Layers className="w-5 h-5 text-[#7c3aed]" />
+                  <span className="font-bold text-white">Flash Cards</span>
+                  {flashcards.length > 0 && (
+                    <span className="text-xs text-gray-500">{currentCardIndex + 1} / {flashcards.length}</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => fetchFlashcards(true)}
+                  disabled={flashcardsLoading}
+                  className="flex items-center gap-1.5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:border-white/30 transition-all"
                 >
-                  {files.length}
-                </motion.div>
-              </AnimatePresence>
-            </div>
-            
-            <div className="p-4 flex flex-col gap-2 min-h-[80px] justify-center">
-              <AnimatePresence mode="popLayout">
-                {files.length === 0 ? (
-                  <motion.div 
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    className="text-center"
-                  >
-                    <span className="text-xs italic text-gray-500">No additional files added yet</span>
-                  </motion.div>
-                ) : (
-                  files.map((file, idx) => (
-                    <motion.div 
-                      layout
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      key={idx}
-                      className="flex items-center justify-between bg-[#1A1A24] border border-white/5 rounded-lg p-2.5 group"
-                    >
-                      <div className="flex items-center gap-3 overflow-hidden">
-                        <FileIcon className="w-4 h-4 text-royal-purple flex-shrink-0" />
-                        <div className="flex flex-col min-w-0">
-                          <span className="text-sm font-medium text-gray-300 truncate">{file.name}</span>
-                          <span className="text-[10px] text-gray-500">{(file.size / 1024).toFixed(0)}kb</span>
+                  <RefreshCw className={`w-3 h-3 ${flashcardsLoading ? 'animate-spin' : ''}`} />
+                  Regenerate
+                </button>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center gap-6 min-h-[500px] px-6">
+                {flashcardsLoading ? (
+                  <div className="w-full max-w-lg h-[220px] animate-pulse bg-white/5 rounded-2xl" />
+                ) : flashcardsComplete ? (
+                  /* Completion state */
+                  <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl p-8 text-center max-w-md w-full">
+                    <Trophy className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+                    <h3 className="text-2xl font-bold text-white mb-6">Session Complete!</h3>
+                    <div className="flex justify-center gap-8 mb-4">
+                      <div className="text-center">
+                        <p className="text-3xl font-bold text-emerald-400">{scores.correct}</p>
+                        <p className="text-xs text-gray-500 mt-1">Correct</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-3xl font-bold text-red-400">{scores.wrong}</p>
+                        <p className="text-xs text-gray-500 mt-1">Missed</p>
+                      </div>
+                    </div>
+                    <p className="text-2xl font-bold text-[#7c3aed] mb-6">
+                      {flashcards.length > 0 ? Math.round(scores.correct / flashcards.length * 100) : 0}%
+                    </p>
+                    <div className="flex gap-3 justify-center">
+                      <button
+                        onClick={() => {
+                          setCurrentCardIndex(0); setFlipped(false); setScores({ correct: 0, wrong: 0 }); setCardResults({}); setFlashcardsComplete(false)
+                        }}
+                        className="px-6 py-2 border border-white/10 rounded-xl text-sm text-gray-400 hover:text-white hover:border-white/30 transition-all"
+                      >
+                        Restart
+                      </button>
+                      <button
+                        onClick={() => fetchFlashcards(true)}
+                        className="px-6 py-2 bg-[#7c3aed] rounded-xl text-sm text-white hover:bg-purple-500 transition-all"
+                      >
+                        Regenerate
+                      </button>
+                    </div>
+                  </div>
+                ) : flashcards.length > 0 ? (
+                  <>
+                    {/* Score counters */}
+                    <div className="flex gap-3">
+                      <span className="bg-white/5 rounded-lg px-3 py-1 text-sm font-semibold text-emerald-400">✓ {scores.correct}</span>
+                      <span className="bg-white/5 rounded-lg px-3 py-1 text-sm font-semibold text-red-400">✗ {scores.wrong}</span>
+                    </div>
+
+                    {/* The flashcard */}
+                    <div className="w-full max-w-lg" style={{ perspective: '1000px' }}>
+                      <div
+                        className="relative w-full cursor-pointer"
+                        style={{ transformStyle: 'preserve-3d', transition: 'transform 0.5s ease', transform: flipped ? 'rotateY(180deg)' : '' }}
+                        onClick={() => setFlipped(p => !p)}
+                      >
+                        {/* Front */}
+                        <div
+                          className="bg-[#1a1a1a] border border-white/10 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[220px]"
+                          style={{ backfaceVisibility: 'hidden' }}
+                        >
+                          <span className="bg-purple-900/30 text-purple-400 text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider mb-4">
+                            {flashcards[currentCardIndex]?.category}
+                          </span>
+                          <p className="text-xl font-semibold text-white text-center leading-relaxed">
+                            {flashcards[currentCardIndex]?.question}
+                          </p>
+                          <p className="text-xs text-gray-600 mt-4">Click to reveal answer</p>
+                        </div>
+
+                        {/* Back */}
+                        <div
+                          className="absolute inset-0 bg-[#1f1a2e] border border-purple-500/20 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[220px]"
+                          style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
+                        >
+                          <span className="text-xs text-purple-400 uppercase tracking-wider mb-4">Answer</span>
+                          <p className="text-base text-gray-200 text-center leading-relaxed">
+                            {flashcards[currentCardIndex]?.answer}
+                          </p>
                         </div>
                       </div>
-                      <button 
-                        onClick={() => setFiles(prev => prev.filter((_, i) => i !== idx))}
-                        className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-white/10 text-gray-500 hover:text-white transition-all"
+                    </div>
+
+                    {/* Result buttons — only when flipped */}
+                    {flipped && (
+                      <div className="flex gap-4">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleCardResult('correct') }}
+                          className="bg-emerald-900/30 border border-emerald-500/30 hover:bg-emerald-900/50 text-emerald-400 rounded-xl px-8 py-3 text-sm font-medium transition-all"
+                        >
+                          Got it ✓
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleCardResult('wrong') }}
+                          className="bg-red-900/30 border border-red-500/30 hover:bg-red-900/50 text-red-400 rounded-xl px-8 py-3 text-sm font-medium transition-all"
+                        >
+                          Missed ✗
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Navigation row */}
+                    <div className="flex items-center gap-4">
+                      <button
+                        disabled={currentCardIndex === 0}
+                        onClick={() => { setCurrentCardIndex(p => p - 1); setFlipped(false) }}
+                        className="p-2 rounded-lg text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                       >
-                        <X className="w-3.5 h-3.5" />
+                        <ChevronLeft className="w-5 h-5" />
                       </button>
-                    </motion.div>
-                  ))
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Upload Buttons */}
-            <div className="px-4 py-3 border-t border-white/5 bg-white/[0.01] flex gap-2">
-              {/* Hidden Inputs */}
-              <input ref={pdfInputRef} type="file" className="hidden" accept=".pdf" onChange={(e) => e.target.files && handleFiles(e.target.files)} />
-              <input ref={wordInputRef} type="file" className="hidden" accept=".doc,.docx" onChange={(e) => e.target.files && handleFiles(e.target.files)} />
-              <input ref={imageInputRef} type="file" className="hidden" accept="image/*" onChange={(e) => e.target.files && handleFiles(e.target.files)} />
-
-              <button 
-                onClick={() => pdfInputRef.current?.click()}
-                className="flex-1 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-semibold text-gray-300 hover:text-white flex flex-col items-center gap-1 transition-colors border border-white/5 hover:border-white/10"
-              >
-                <div className="w-6 h-6 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center">
-                  <FileText className="w-3.5 h-3.5" />
-                </div>
-                PDF
-              </button>
-              <button 
-                onClick={() => wordInputRef.current?.click()}
-                className="flex-1 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-semibold text-gray-300 hover:text-white flex flex-col items-center gap-1 transition-colors border border-white/5 hover:border-white/10"
-              >
-                <div className="w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center">
-                  <FileIcon className="w-3.5 h-3.5" />
-                </div>
-                Word
-              </button>
-              <button 
-                onClick={() => imageInputRef.current?.click()}
-                className="flex-1 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-semibold text-gray-300 hover:text-white flex flex-col items-center gap-1 transition-colors border border-white/5 hover:border-white/10"
-              >
-                <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                  <ImageIcon className="w-3.5 h-3.5" />
-                </div>
-                Image
-              </button>
-            </div>
-          </div>
-
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider pl-1 font-mono">Lecture Tools</div>
-
-          {/* Action Cards */}
-          <div className="flex flex-col gap-3">
-            {/* Audio Overview - Disabled */}
-            <div className="relative p-4 rounded-xl border border-white/5 bg-white/[0.02] flex items-center gap-4 opacity-40 cursor-not-allowed group">
-              <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-white/10 text-[10px] uppercase font-bold text-gray-400">Coming Soon</div>
-              <div className="p-2.5 rounded-lg bg-white/5 text-gray-400">
-                <Headphones className="w-5 h-5" />
-              </div>
-              <div className="cursor-not-allowed">
-                <h4 className="text-sm font-bold text-gray-300">Audio Overview</h4>
-                <p className="text-xs text-gray-500 mt-0.5">Listen to an AI podcast of this lecture</p>
-              </div>
-              <Tooltip text="Audio overview coming in the next update 🎧" />
-            </div>
-
-            {/* Reports */}
-            <ActionCard 
-              icon={<FileText className="w-5 h-5" />} 
-              title="Lecture Report" 
-              desc="Generate a comprehensive written summary" 
-              onClick={handleGenerateReport} 
-            />
-            
-            {/* Flash Cards */}
-            <ActionCard 
-              icon={<Layers className="w-5 h-5" />} 
-              title="Flash Cards" 
-              desc="Review key concepts with an interactive deck" 
-              onClick={() => handleGenerateQA(true)} 
-            />
-            
-            {/* Q & A */}
-            <ActionCard 
-              icon={<HelpCircle className="w-5 h-5" />} 
-              title="Q & A Analysis" 
-              desc="Deep dive into expected questions and answers" 
-              onClick={() => handleGenerateQA(false)} 
-            />
-          </div>
-        </motion.div>
-      </div>
-
-      {/* DRAWERS & MODALS */}
-
-      {/* Report Drawer */}
-      <AnimatePresence>
-        {showReport && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowReport(false)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50"
-            />
-            <motion.div
-              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 bottom-0 w-full md:w-[500px] bg-[#111116] border-l border-white/5 z-50 flex flex-col shadow-2xl"
-            >
-              <div className="p-4 border-b border-white/5 flex items-center justify-between bg-[#1A1A24]/50">
-                <h3 className="font-semibold text-white flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-royal-purple" />
-                  Lecture Report
-                </h3>
-                <button onClick={() => setShowReport(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-overlay custom-scrollbar p-6">
-                {isGeneratingReport ? (
-                  <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-4">
-                    <RefreshCcw className="w-8 h-8 animate-spin text-royal-purple" />
-                    <p>Generating comprehensive report...</p>
-                  </div>
-                ) : (
-                  <div className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed font-sans ai-content">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportContent || "*Empty report*"}</ReactMarkdown>
-                  </div>
-                )}
+                      <div className="flex gap-1.5 items-center flex-wrap justify-center">
+                        {flashcards.slice(0, 10).map((_, i) => (
+                          <div
+                            key={i}
+                            className={`w-2 h-2 rounded-full transition-all ${
+                              i === currentCardIndex ? 'bg-[#7c3aed] scale-125'
+                              : cardResults[i] === 'correct' ? 'bg-emerald-500'
+                              : cardResults[i] === 'wrong' ? 'bg-red-500'
+                              : 'bg-gray-600'
+                            }`}
+                          />
+                        ))}
+                        {flashcards.length > 10 && <span className="text-xs text-gray-600">...</span>}
+                      </div>
+                      <button
+                        disabled={currentCardIndex >= flashcards.length - 1}
+                        onClick={() => { setCurrentCardIndex(p => p + 1); setFlipped(false) }}
+                        className="p-2 rounded-lg text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                      >
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </>
+                ) : null}
               </div>
             </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+          )}
 
-      {/* Q&A Drawer */}
-      <AnimatePresence>
-        {showQA && (
-          <>
+          {/* ─── Q&A Analysis Panel ─── */}
+          {activeFeature === 'qa' && (
             <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setShowQA(false)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50"
-            />
-            <motion.div
-              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 bottom-0 w-full md:w-[500px] bg-[#111116] border-l border-white/5 z-50 flex flex-col shadow-2xl"
+              key="qa"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="h-full flex flex-col"
             >
-              <div className="p-4 border-b border-white/5 flex items-center justify-between bg-[#1A1A24]/50">
-                <h3 className="font-semibold text-white flex items-center gap-2">
-                  <HelpCircle className="w-4 h-4 text-royal-purple" />
-                  Q & A Analysis
-                </h3>
-                <button onClick={() => setShowQA(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors">
-                  <X className="w-4 h-4" />
+              {/* Top bar */}
+              <div className="sticky top-0 bg-[#0a0a0a]/80 backdrop-blur-sm border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
+                <div className="flex items-center gap-3">
+                  <HelpCircle className="w-5 h-5 text-[#7c3aed]" />
+                  <span className="font-bold text-white">Q&A Analysis</span>
+                  {qaQuestions.length > 0 && (
+                    <span className="text-xs text-gray-500">{qaQuestions.length} Questions</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => fetchQA(true)}
+                  disabled={qaLoading}
+                  className="flex items-center gap-1.5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:border-white/30 transition-all"
+                >
+                  <RefreshCw className={`w-3 h-3 ${qaLoading ? 'animate-spin' : ''}`} />
+                  Regenerate
                 </button>
               </div>
-              <div className="flex-1 overflow-y-overlay custom-scrollbar p-6">
-                {isGeneratingQA ? (
-                  <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-4">
-                    <RefreshCcw className="w-8 h-8 animate-spin text-royal-purple" />
-                    <p>Extracting key questions and answers...</p>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto px-6 py-6">
+                {qaLoading ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3, 4, 5].map(i => (
+                      <div key={i} className="animate-pulse bg-white/5 rounded-xl h-16" />
+                    ))}
                   </div>
-                ) : (
-                  <div className="prose prose-invert prose-sm max-w-none text-gray-300 leading-relaxed font-sans ai-content">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{qaContent || "*Empty Q&A*"}</ReactMarkdown>
+                ) : qaQuestions.length > 0 ? (
+                  <div className="space-y-3">
+                    {qaQuestions.map((item, i) => {
+                      const diffColors: Record<string, string> = {
+                        easy: 'bg-emerald-900/40 text-emerald-300',
+                        medium: 'bg-amber-900/40 text-amber-300',
+                        hard: 'bg-red-900/40 text-red-300'
+                      }
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => setExpandedQA(expandedQA === i ? null : i)}
+                          className="bg-[#1a1a1a] border border-white/[0.08] rounded-xl p-4 cursor-pointer hover:border-white/20 transition-all"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full ${diffColors[item.difficulty] || diffColors.medium}`}>
+                              {item.difficulty}
+                            </span>
+                            <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-gray-400">
+                              {item.type}
+                            </span>
+                            <p className="text-sm font-medium text-white flex-1 ml-2">{item.question}</p>
+                            {expandedQA === i ? <ChevronUp className="w-4 h-4 text-gray-500 shrink-0" /> : <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" />}
+                          </div>
+                          <AnimatePresence>
+                            {expandedQA === i && (
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="overflow-hidden"
+                              >
+                                <p className="text-sm text-gray-300 leading-relaxed pt-3 border-t border-white/5 mt-3">{item.answer}</p>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      )
+                    })}
+                    {/* Export */}
+                    <button
+                      onClick={() => {
+                        const text = qaQuestions.map((q, i) => `Q${i + 1} [${q.difficulty}] (${q.type}): ${q.question}\nA: ${q.answer}\n`).join('\n')
+                        const blob = new Blob([text], { type: 'text/plain' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `qa-analysis-${session.name}.txt`
+                        a.click()
+                        URL.revokeObjectURL(url)
+                      }}
+                      className="w-full bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-4 py-2 text-sm text-gray-400 flex items-center justify-center gap-2 transition-all mt-4"
+                    >
+                      <Download className="w-4 h-4" />
+                      Export Q&A
+                    </button>
                   </div>
-                )}
+                ) : null}
               </div>
             </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+          )}
 
-      {/* Flashcards Modal (3D CSS setup) */}
-      <AnimatePresence>
-        {showFlashcards && (
-          <>
+          {/* ─── Audio Overview Panel ─── */}
+          {activeFeature === 'audio' && (
             <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => { setShowFlashcards(false); setIsFlipped(false); setFlashcardIndex(0); }}
-              className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4"
+              key="audio"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="h-full flex flex-col"
             >
-              {isGeneratingQA ? (
-                <div className="flex flex-col items-center justify-center text-gray-400 gap-4">
-                  <RefreshCcw className="w-8 h-8 animate-spin text-royal-purple" />
-                  <p>Building flashcard deck...</p>
+              {audioUrl ? (
+                <>
+                  {/* Top bar */}
+                  <div className="sticky top-0 bg-[#0a0a0a]/80 backdrop-blur-sm border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
+                    <div className="flex items-center gap-3">
+                      <Headphones className="w-5 h-5 text-[#7c3aed]" />
+                      <span className="font-bold text-white">Audio Overview</span>
+                      <span className="text-xs text-gray-500">{fmtTime(duration)}</span>
+                    </div>
+                    <button
+                      onClick={() => { setAudioUrl(null); setCaptionsUrl(null); setCaptions([]); setActiveCaptionId(null); generatePodcast() }}
+                      className="flex items-center gap-1.5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:border-white/30 transition-all"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Regenerate
+                    </button>
+                  </div>
+
+                  {/* Player */}
+                  <div className="flex-1 overflow-y-auto px-6 py-6">
+                    <div className="bg-[#1a1a1a] border border-purple-500/20 rounded-2xl p-6 max-w-lg mx-auto mt-8">
+                      {/* Avatars */}
+                      <div className="flex items-center gap-3 mb-6">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-purple-700 flex items-center justify-center text-white text-xs font-bold">A</div>
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white text-xs font-bold">B</div>
+                        <span className="text-xs text-gray-500 ml-2">AI Podcast · {fmtTime(duration)}</span>
+                      </div>
+
+                      {/* Play button */}
+                      <div className="flex justify-center mb-6">
+                        <button
+                          onClick={() => {
+                            if (!audioRef.current) return
+                            if (isPlaying) { audioRef.current.pause(); setIsPlaying(false) }
+                            else { audioRef.current.play(); setIsPlaying(true) }
+                          }}
+                          className="w-16 h-16 rounded-full bg-purple-600 hover:bg-purple-500 flex items-center justify-center shadow-lg shadow-purple-900/40 transition-all"
+                        >
+                          {isPlaying ? <Pause className="w-6 h-6 text-white" /> : <Play className="w-6 h-6 text-white ml-1" />}
+                        </button>
+                      </div>
+
+                      {/* Progress bar */}
+                      <div
+                        className="w-full h-1.5 bg-white/10 rounded-full cursor-pointer relative mb-2"
+                        onClick={(e) => {
+                          if (!audioRef.current || !duration) return
+                          const rect = e.currentTarget.getBoundingClientRect()
+                          const pct = (e.clientX - rect.left) / rect.width
+                          audioRef.current.currentTime = pct * duration
+                        }}
+                      >
+                        <div
+                          className="h-full bg-gradient-to-r from-purple-500 to-purple-400 rounded-full"
+                          style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-gray-500 mb-4">
+                        <span>{fmtTime(currentTime)}</span>
+                        <span>{fmtTime(duration)}</span>
+                      </div>
+
+                      {/* Playback speed */}
+                      <div className="flex gap-2 justify-center mb-4">
+                        {[0.75, 1, 1.25, 1.5].map(r => (
+                          <button
+                            key={r}
+                            onClick={() => { setPlaybackRate(r); if (audioRef.current) audioRef.current.playbackRate = r }}
+                            className={`px-2 py-1 rounded text-xs transition-all ${playbackRate === r ? 'bg-purple-900/40 text-purple-300' : 'text-gray-500 hover:text-gray-300'}`}
+                          >
+                            {r}x
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Download */}
+                      <button
+                        onClick={() => {
+                          const a = document.createElement('a')
+                          a.href = `http://localhost:8000${audioUrl}`
+                          a.download = `podcast-${session.name}.mp3`
+                          a.click()
+                        }}
+                        className="bg-white/5 rounded-lg px-3 py-1.5 text-xs text-gray-400 flex items-center gap-1.5 hover:bg-white/10 transition-all w-full justify-center"
+                      >
+                        <Download className="w-3 h-3" />
+                        Download
+                      </button>
+                    </div>
+
+                    {/* Live Captions */}
+                    {captions.length > 0 && (
+                      <div className="max-w-lg mx-auto w-full mt-6 relative h-[160px]">
+                        {/* Ambient glow */}
+                        <div className={`absolute inset-0 rounded-2xl blur-2xl opacity-10 transition-colors duration-700 pointer-events-none ${
+                          activeCaptionId !== null && captions[activeCaptionId]?.speaker === 'HOST_A'
+                            ? 'bg-purple-600'
+                            : activeCaptionId !== null
+                            ? 'bg-blue-600'
+                            : 'bg-transparent'
+                        }`} />
+                        {/* Background */}
+                        <div className="absolute inset-0 rounded-2xl bg-[#111111]/60 backdrop-blur-sm border border-white/5" />
+                        {/* Gradient fade — top */}
+                        <div className="absolute top-0 left-0 right-0 h-10 bg-gradient-to-b from-[#0a0a0a] to-transparent z-10 rounded-t-2xl pointer-events-none" />
+                        {/* Gradient fade — bottom */}
+                        <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-[#0a0a0a] to-transparent z-10 rounded-b-2xl pointer-events-none" />
+                        {/* Caption content */}
+                        <div
+                          className="absolute inset-0 flex flex-col items-center justify-center px-8 z-[5] transition-opacity duration-500"
+                          style={{ opacity: activeCaptionId !== null && !isPlaying ? 0.5 : 1 }}
+                        >
+                          <AnimatePresence mode="wait">
+                            {activeCaptionId === null ? (
+                              <motion.p
+                                key="placeholder"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="text-xs text-gray-600 text-center"
+                              >
+                                Captions will appear here during playback
+                              </motion.p>
+                            ) : (() => {
+                              const caption = captions.find(c => c.id === activeCaptionId)
+                              if (!caption) return null
+                              return (
+                                <motion.div
+                                  key={activeCaptionId}
+                                  initial={{ opacity: 0, y: 12, scale: 0.97 }}
+                                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                                  exit={{ opacity: 0, y: -10 }}
+                                  transition={{
+                                    duration: 0.3,
+                                    ease: [0, 0, 0.2, 1],
+                                    exit: { duration: 0.2 }
+                                  }}
+                                  className="flex flex-col items-center gap-2 text-center relative"
+                                >
+                                  {/* Left accent bar */}
+                                  <motion.div
+                                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-10 rounded-full ${
+                                      caption.speaker === 'HOST_A' ? 'bg-purple-500' : 'bg-blue-500'
+                                    }`}
+                                    initial={{ scaleY: 0 }}
+                                    animate={{ scaleY: 1 }}
+                                    transition={{ duration: 0.3 }}
+                                  />
+                                  {/* Speaker label */}
+                                  <motion.span
+                                    className={`text-[10px] font-bold uppercase tracking-[0.15em] ${
+                                      caption.speaker === 'HOST_A' ? 'text-purple-400' : 'text-blue-400'
+                                    }`}
+                                    initial={{ opacity: 0, y: 6 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.05, duration: 0.2 }}
+                                  >
+                                    {caption.speaker === 'HOST_A' ? 'Host A' : 'Host B'}
+                                  </motion.span>
+                                  {/* Caption text — solid block */}
+                                  <motion.p
+                                    className={`text-sm font-medium leading-relaxed ${
+                                      caption.speaker === 'HOST_A' ? 'text-purple-300' : 'text-blue-300'
+                                    }`}
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    transition={{ delay: 0.1, duration: 0.25 }}
+                                  >
+                                    {caption.text}
+                                  </motion.p>
+                                </motion.div>
+                              )
+                            })()}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : generating ? (
+                /* Generating state */
+                <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8">
+                  {/* Waveform animation */}
+                  <div className="flex items-end gap-1 h-12">
+                    {[0, 1, 2, 3, 4].map(i => (
+                      <div
+                        key={i}
+                        className="w-1.5 bg-purple-500 rounded-full"
+                        style={{
+                          animation: `waveBar 0.8s ease-in-out ${i * 0.15}s infinite alternate`,
+                          height: '8px'
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <style>{`
+                    @keyframes waveBar {
+                      0% { height: 8px; }
+                      100% { height: 40px; }
+                    }
+                  `}</style>
+                  <p className="text-sm text-gray-300 animate-pulse">{genStep}</p>
+                  <p className="text-xs text-gray-600">This may take 2-4 minutes. Please keep this page open.</p>
+                </div>
+              ) : audioError ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8">
+                  <div className="border border-red-500/30 bg-red-900/10 rounded-xl p-4 max-w-md text-center">
+                    <p className="text-sm text-red-400">{audioError}</p>
+                    <button onClick={generatePodcast} className="mt-3 text-xs text-red-300 underline">Retry</button>
+                  </div>
                 </div>
               ) : (
-                <div 
-                  className="w-full max-w-2xl aspect-video perspective-1000" 
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="w-full flex justify-between items-center mb-6 text-white font-mono gap-4">
-                    <span className="text-gray-400">Card {flashcardIndex + 1} of {flashcards.length}</span>
-                    <button onClick={() => setShowFlashcards(false)} className="hover:text-royal-purple text-gray-400 transition-colors">
-                      <X className="w-6 h-6" />
-                    </button>
+                /* Generation prompt */
+                <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8">
+                  <div className="relative">
+                    <Headphones className="w-16 h-16 text-[#7c3aed]" style={{ filter: 'drop-shadow(0 0 20px rgba(124,58,237,0.3))' }} />
                   </div>
-
-                  <div 
-                    className={`relative w-full h-[300px] cursor-pointer preserve-3d transition-transform duration-700 ${isFlipped ? 'rotate-y-180' : ''}`}
-                    onClick={() => setIsFlipped(!isFlipped)}
+                  <h2 className="text-2xl font-bold text-white">Audio Overview</h2>
+                  <p className="text-sm text-gray-500 text-center max-w-md">
+                    Generate an AI podcast of this lecture — a two-host conversational discussion covering all the key topics.
+                  </p>
+                  <button
+                    onClick={generatePodcast}
+                    className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-semibold rounded-xl px-8 py-4 text-base flex items-center gap-3 shadow-lg shadow-purple-900/30 transition-all"
                   >
-                    {/* Front */}
-                    <div className="absolute inset-0 backface-hidden bg-gradient-to-br from-[#1A1A24] to-[#111116] border border-white/10 rounded-3xl shadow-2xl flex flex-col items-center justify-center p-8 text-center">
-                      <HelpCircle className="w-8 h-8 text-royal-purple/50 mb-4" />
-                      <h3 className="text-2xl font-bold text-white text-balance">{flashcards[flashcardIndex]?.q}</h3>
-                      <p className="absolute bottom-6 text-xs text-gray-500 font-mono">Click to flip</p>
-                    </div>
-
-                    {/* Back */}
-                    <div className="absolute inset-0 backface-hidden rotate-y-180 bg-gradient-to-br from-royal-purple/20 to-[#111116] border border-royal-purple/30 rounded-3xl shadow-[0_0_50px_rgba(109,40,217,0.15)] flex flex-col items-center justify-center p-8 text-center">
-                      <div className="flex-1 w-full flex items-center justify-center overflow-y-auto custom-scrollbar">
-                        <p className="text-xl font-medium text-gray-200 text-balance leading-relaxed">
-                          {flashcards[flashcardIndex]?.a}
-                        </p>
-                      </div>
-                      <p className="text-xs text-royal-purple/60 mt-4 font-mono">Click to flip back</p>
-                    </div>
-                  </div>
-
-                  {/* Navigation below card */}
-                  <div className="flex justify-center gap-4 mt-8">
-                    <button 
-                      disabled={flashcardIndex === 0}
-                      onClick={(e) => { e.stopPropagation(); setIsFlipped(false); setTimeout(() => setFlashcardIndex(prev => Math.max(0, prev - 1)), 150) }}
-                      className="px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-white/5 transition-colors font-semibold text-sm"
-                    >
-                      Previous
-                    </button>
-                    <button 
-                      disabled={flashcardIndex === flashcards.length - 1}
-                      onClick={(e) => { e.stopPropagation(); setIsFlipped(false); setTimeout(() => setFlashcardIndex(prev => Math.min(flashcards.length - 1, prev + 1)), 150) }}
-                      className="px-6 py-3 rounded-xl bg-royal-purple hover:bg-royal-purple/80 disabled:opacity-30 disabled:hover:bg-royal-purple transition-colors font-semibold text-sm shadow-[0_4px_20px_rgba(109,40,217,0.3)]"
-                    >
-                      Next Card
-                    </button>
-                  </div>
+                    <Headphones className="w-5 h-5" />
+                    Generate Podcast
+                  </button>
+                  <p className="text-xs text-gray-600">Generation takes 2-4 minutes</p>
                 </div>
               )}
             </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background-color: rgba(109, 40, 217, 0.3);
-          border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background-color: rgba(109, 40, 217, 0.5);
-        }
-
-        .ai-content p { margin-bottom: 0.75em; }
-        .ai-content p:last-child { margin-bottom: 0; }
-        .ai-content ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 0.75em; }
-        .ai-content ol { list-style-type: decimal; padding-left: 1.5em; margin-bottom: 0.75em; }
-        .ai-content li { margin-bottom: 0.25em; }
-        .ai-content code { bg-color: rgba(0,0,0,0.3); padding: 0.2em 0.4em; border-radius: 0.25em; font-family: monospace; font-size: 0.9em; }
-        .ai-content pre code { bg-color: transparent; padding: 0; }
-        .ai-content pre { background-color: rgba(0,0,0,0.3); padding: 1em; border-radius: 0.5em; overflow-x: auto; margin-bottom: 0.75em; }
-
-        .perspective-1000 { perspective: 1000px; }
-        .preserve-3d { transform-style: preserve-3d; }
-        .backface-hidden { backface-visibility: hidden; }
-        .rotate-y-180 { transform: rotateY(180deg); }
-      `}</style>
-    </div>
-  )
-}
-
-function ActionCard({ icon, title, desc, onClick }: { icon: React.ReactNode, title: string, desc: string, onClick: () => void }) {
-  return (
-    <motion.button
-      whileHover={{ y: -2, backgroundColor: 'rgba(255,255,255,0.04)', boxShadow: '0 8px 20px rgba(0,0,0,0.2)' }}
-      whileTap={{ scale: 0.98 }}
-      onClick={onClick}
-      className="p-4 rounded-xl border border-white/5 bg-white/[0.02] flex items-center gap-4 text-left group transition-colors"
-    >
-      <div className="p-2.5 rounded-lg bg-white/5 text-royal-purple group-hover:bg-royal-purple/20 transition-colors">
-        {icon}
-      </div>
-      <div className="flex-1">
-        <h4 className="text-sm font-bold text-gray-200 group-hover:text-white transition-colors">{title}</h4>
-        <p className="text-xs text-gray-500 mt-0.5 group-hover:text-gray-400 transition-colors">{desc}</p>
-      </div>
-      <motion.div className="text-gray-600 group-hover:text-gray-400" transition={{ duration: 0.2 }}>
-        <ArrowLeft className="w-4 h-4 rotate-180 group-hover:translate-x-1 transition-transform duration-200" />
-      </motion.div>
-    </motion.button>
-  )
-}
-
-function Tooltip({ text }: { text: string }) {
-  return (
-    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-50">
-      <div className="px-3 py-1.5 bg-[#1A1A1A] border border-white/10 rounded-lg text-xs tracking-wide text-gray-300 whitespace-nowrap shadow-xl">
-        {text}
+          )}
+        </AnimatePresence>
       </div>
     </div>
   )

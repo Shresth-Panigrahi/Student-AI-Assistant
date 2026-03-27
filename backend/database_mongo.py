@@ -190,6 +190,38 @@ def add_qa_pairs(session_id: str, qa_list: List[Dict]) -> bool:
         print(f"❌ Error adding Q&A pairs: {e}")
         return False
 
+def update_session_field(session_id: str, field: str, value) -> bool:
+    """Generic helper to update any field on a session document"""
+    try:
+        db = get_database()
+        result = db.sessions.update_one(
+            {"_id": session_id},
+            {
+                "$set": {
+                    field: value,
+                    "updated_at": datetime.now()
+                }
+            }
+        )
+        if result.modified_count > 0 or result.matched_count > 0:
+            print(f"✅ Field '{field}' updated for session {session_id}")
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Error updating field '{field}': {e}")
+        return False
+
+
+def update_session_flashcards(session_id: str, flashcards: list) -> bool:
+    """Save flashcards for a session"""
+    return update_session_field(session_id, "flashcards", flashcards)
+
+
+def update_session_qa_analysis(session_id: str, qa_analysis: list) -> bool:
+    """Save Q&A analysis for a session"""
+    return update_session_field(session_id, "qa_analysis", qa_analysis)
+
+
 def delete_session(session_id: str) -> bool:
     """Delete a session"""
     try:
