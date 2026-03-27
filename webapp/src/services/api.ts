@@ -99,6 +99,17 @@ export const api = {
     return response.data
   },
 
+  // Video Lecture
+  generateVideo: async (session_id: string) => {
+    const response = await axios.post(`${API_BASE}/video/generate`, { session_id })
+    return response.data
+  },
+
+  getVideoStatus: async (session_id: string) => {
+    const response = await axios.get(`${API_BASE}/video/status/${session_id}`)
+    return response.data
+  },
+
   // Authentication
   login: async (username_or_email: string, password: string) => {
     const response = await axios.post(`${API_BASE}/auth/login`, { username_or_email, password })

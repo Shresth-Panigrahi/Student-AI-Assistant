@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, Sparkles, ChevronRight, ChevronDown, ChevronUp, ChevronLeft,
-  Headphones, FileText, Layers, HelpCircle, GitFork, Lock, Plus, X,
+  Headphones, FileText, Layers, HelpCircle, Film, Lock, Plus, X,
   RefreshCw, Download, Play, Pause, Trophy
 } from 'lucide-react'
 import { api } from '@/services/api'
@@ -49,7 +49,7 @@ interface CaptionSegment {
   endTime: number
 }
 
-type ActiveFeature = null | 'audio' | 'report' | 'flashcards' | 'qa'
+type ActiveFeature = null | 'audio' | 'report' | 'flashcards' | 'qa' | 'video'
 
 // ─── Component ───────────────────────────────────────────────
 export default function ChatSession() {
@@ -105,6 +105,13 @@ export default function ChatSession() {
   const [captions, setCaptions] = useState<CaptionSegment[]>([])
   const [activeCaptionId, setActiveCaptionId] = useState<number | null>(null)
   const captionsRef = useRef<CaptionSegment[]>([])
+
+  // Video Lecture
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [videoStatus, setVideoStatus] = useState<string>('none')
+  const [videoProgress, setVideoProgress] = useState('')
+  const [videoError, setVideoError] = useState<string | null>(null)
+  const videoPollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // ─── Load Session ────────────────────────────────────────────
   useEffect(() => {
@@ -180,7 +187,15 @@ export default function ChatSession() {
     if (activeFeature === 'flashcards' && flashcards.length === 0 && !flashcardsLoading) fetchFlashcards()
     if (activeFeature === 'qa' && qaQuestions.length === 0 && !qaLoading) fetchQA()
     if (activeFeature === 'audio' && !audioUrl && !generating && !audioLoading) checkAudio()
+    if (activeFeature === 'video' && !videoUrl && videoStatus === 'none') checkVideoStatus()
   }, [activeFeature])
+
+  // Cleanup video polling on unmount
+  useEffect(() => {
+    return () => {
+      if (videoPollingRef.current) clearInterval(videoPollingRef.current)
+    }
+  }, [])
 
   // ─── API Calls ──────────────────────────────────────────────
   const fetchReport = async (force = false) => {
@@ -244,8 +259,8 @@ export default function ChatSession() {
     try {
       const res = await api.checkAudioOverview(sessionId)
       if (res.exists && res.audio_url) {
-        setAudioUrl(res.audio_url)
-        if (res.captions_url) setCaptionsUrl(res.captions_url)
+        setAudioUrl(`${res.audio_url}?t=${Date.now()}`)
+        if (res.captions_url) setCaptionsUrl(`${res.captions_url}?t=${Date.now()}`)
       }
     } catch (e) {
       console.error('Audio check error:', e)
@@ -270,9 +285,9 @@ export default function ChatSession() {
     try {
       const res = await api.generateAudioOverview(sessionId, contextFiles)
       if (res.success) {
-        setAudioUrl(res.audio_url)
+        setAudioUrl(`${res.audio_url}?t=${Date.now()}`)
         setDuration(res.duration_seconds)
-        if (res.captions_url) setCaptionsUrl(res.captions_url)
+        if (res.captions_url) setCaptionsUrl(`${res.captions_url}?t=${Date.now()}`)
       } else {
         setAudioError(res.message || 'Failed to generate audio')
       }
@@ -281,6 +296,68 @@ export default function ChatSession() {
     } finally {
       clearInterval(interval)
       setGenerating(false)
+    }
+  }
+
+  // ─── Video Lecture ─────────────────────────────────────────
+  const checkVideoStatus = async () => {
+    if (!sessionId) return
+    try {
+      const res = await api.getVideoStatus(sessionId)
+      setVideoStatus(res.status || 'none')
+      setVideoProgress(res.message || '')
+      if (res.video_url) setVideoUrl(res.video_url)
+      if (res.error) setVideoError(res.error)
+      // If in progress, start polling
+      if (['queued', 'generating', 'rendering', 'audio', 'merging'].includes(res.status)) {
+        startVideoPolling()
+      }
+    } catch (e) {
+      console.error('Video status check error:', e)
+    }
+  }
+
+  const startVideoPolling = () => {
+    if (videoPollingRef.current) return // already polling
+    videoPollingRef.current = setInterval(async () => {
+      if (!sessionId) return
+      try {
+        const res = await api.getVideoStatus(sessionId)
+        setVideoStatus(res.status || 'none')
+        setVideoProgress(res.message || '')
+        if (res.video_url) {
+          setVideoUrl(res.video_url)
+        }
+        if (res.error) setVideoError(res.error)
+        // Stop polling if complete or failed
+        if (res.status === 'complete' || res.status === 'failed') {
+          if (videoPollingRef.current) clearInterval(videoPollingRef.current)
+          videoPollingRef.current = null
+        }
+      } catch (e) {
+        console.error('Video polling error:', e)
+      }
+    }, 5000)
+  }
+
+  const generateVideo = async () => {
+    if (!sessionId) return
+    setVideoError(null)
+    setVideoUrl(null)
+    setVideoStatus('queued')
+    setVideoProgress('Starting video generation pipeline...')
+    try {
+      const res = await api.generateVideo(sessionId)
+      if (res.success) {
+        setVideoStatus(res.status || 'queued')
+        startVideoPolling()
+      } else {
+        setVideoError(res.message || 'Failed to start video generation')
+        setVideoStatus('failed')
+      }
+    } catch (e: any) {
+      setVideoError(e.message || 'Network error')
+      setVideoStatus('failed')
     }
   }
 
@@ -361,40 +438,39 @@ export default function ChatSession() {
     badge?: { text: string; style: string }
     disabled?: boolean
   }[] = [
-    {
-      id: 'audio',
-      icon: <Headphones className="w-5 h-5 text-[#7c3aed]" />,
-      title: 'Audio Overview',
-      subtitle: 'AI podcast of this lecture',
-      badge: { text: 'BETA', style: 'bg-purple-900/40 text-purple-300' }
-    },
-    {
-      id: 'report',
-      icon: <FileText className="w-5 h-5 text-[#7c3aed]" />,
-      title: 'Lecture Report',
-      subtitle: 'Comprehensive written summary'
-    },
-    {
-      id: 'flashcards',
-      icon: <Layers className="w-5 h-5 text-[#7c3aed]" />,
-      title: 'Flash Cards',
-      subtitle: 'Interactive study deck'
-    },
-    {
-      id: 'qa',
-      icon: <HelpCircle className="w-5 h-5 text-[#7c3aed]" />,
-      title: 'Q&A Analysis',
-      subtitle: 'Expected exam questions'
-    },
-    {
-      id: null,
-      icon: <GitFork className="w-5 h-5 text-[#7c3aed] rotate-90" />,
-      title: 'Mindmap',
-      subtitle: 'Visual concept map',
-      badge: { text: 'NEXT UPDATE', style: 'bg-gray-800 text-gray-500' },
-      disabled: true
-    }
-  ]
+      {
+        id: 'audio',
+        icon: <Headphones className="w-5 h-5 text-[#7c3aed]" />,
+        title: 'Audio Overview',
+        subtitle: 'AI podcast of this lecture',
+        badge: { text: 'BETA', style: 'bg-purple-900/40 text-purple-300' }
+      },
+      {
+        id: 'report',
+        icon: <FileText className="w-5 h-5 text-[#7c3aed]" />,
+        title: 'Lecture Report',
+        subtitle: 'Comprehensive written summary'
+      },
+      {
+        id: 'flashcards',
+        icon: <Layers className="w-5 h-5 text-[#7c3aed]" />,
+        title: 'Flash Cards',
+        subtitle: 'Interactive study deck'
+      },
+      {
+        id: 'qa',
+        icon: <HelpCircle className="w-5 h-5 text-[#7c3aed]" />,
+        title: 'Q&A Analysis',
+        subtitle: 'Expected exam questions'
+      },
+      {
+        id: 'video' as ActiveFeature,
+        icon: <Film className="w-5 h-5 text-[#7c3aed]" />,
+        title: 'Video Lecture',
+        subtitle: 'Animated explainer video',
+        badge: { text: 'BETA', style: 'bg-purple-900/40 text-purple-300' }
+      }
+    ]
 
   // ─── RENDER ────────────────────────────────────────────────
   return (
@@ -523,13 +599,13 @@ export default function ChatSession() {
               <h2 className="text-2xl font-bold text-white text-center">{session.name}</h2>
               <p className="text-sm text-gray-500">{wordCount} words in transcript</p>
               <div className="flex flex-wrap gap-3 justify-center">
-                {(['audio', 'report', 'flashcards', 'qa'] as ActiveFeature[]).map(f => (
+                {(['audio', 'report', 'flashcards', 'qa', 'video'] as ActiveFeature[]).map(f => (
                   <button
                     key={f}
                     onClick={() => setActiveFeature(f)}
                     className="px-4 py-2 rounded-full border border-purple-500/30 text-sm text-purple-300 hover:bg-purple-900/20 hover:border-purple-500/50 transition-all duration-200"
                   >
-                    {f === 'audio' ? 'Audio Overview' : f === 'report' ? 'Lecture Report' : f === 'flashcards' ? 'Flash Cards' : 'Q&A Analysis'}
+                    {f === 'audio' ? 'Audio Overview' : f === 'report' ? 'Lecture Report' : f === 'flashcards' ? 'Flash Cards' : f === 'qa' ? 'Q&A Analysis' : 'Video Lecture'}
                   </button>
                 ))}
               </div>
@@ -780,12 +856,11 @@ export default function ChatSession() {
                         {flashcards.slice(0, 10).map((_, i) => (
                           <div
                             key={i}
-                            className={`w-2 h-2 rounded-full transition-all ${
-                              i === currentCardIndex ? 'bg-[#7c3aed] scale-125'
-                              : cardResults[i] === 'correct' ? 'bg-emerald-500'
-                              : cardResults[i] === 'wrong' ? 'bg-red-500'
-                              : 'bg-gray-600'
-                            }`}
+                            className={`w-2 h-2 rounded-full transition-all ${i === currentCardIndex ? 'bg-[#7c3aed] scale-125'
+                                : cardResults[i] === 'correct' ? 'bg-emerald-500'
+                                  : cardResults[i] === 'wrong' ? 'bg-red-500'
+                                    : 'bg-gray-600'
+                              }`}
                           />
                         ))}
                         {flashcards.length > 10 && <span className="text-xs text-gray-600">...</span>}
@@ -1008,13 +1083,12 @@ export default function ChatSession() {
                     {captions.length > 0 && (
                       <div className="max-w-lg mx-auto w-full mt-6 relative h-[160px]">
                         {/* Ambient glow */}
-                        <div className={`absolute inset-0 rounded-2xl blur-2xl opacity-10 transition-colors duration-700 pointer-events-none ${
-                          activeCaptionId !== null && captions[activeCaptionId]?.speaker === 'HOST_A'
+                        <div className={`absolute inset-0 rounded-2xl blur-2xl opacity-10 transition-colors duration-700 pointer-events-none ${activeCaptionId !== null && captions[activeCaptionId]?.speaker === 'HOST_A'
                             ? 'bg-purple-600'
                             : activeCaptionId !== null
-                            ? 'bg-blue-600'
-                            : 'bg-transparent'
-                        }`} />
+                              ? 'bg-blue-600'
+                              : 'bg-transparent'
+                          }`} />
                         {/* Background */}
                         <div className="absolute inset-0 rounded-2xl bg-[#111111]/60 backdrop-blur-sm border border-white/5" />
                         {/* Gradient fade — top */}
@@ -1055,18 +1129,16 @@ export default function ChatSession() {
                                 >
                                   {/* Left accent bar */}
                                   <motion.div
-                                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-10 rounded-full ${
-                                      caption.speaker === 'HOST_A' ? 'bg-purple-500' : 'bg-blue-500'
-                                    }`}
+                                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-10 rounded-full ${caption.speaker === 'HOST_A' ? 'bg-purple-500' : 'bg-blue-500'
+                                      }`}
                                     initial={{ scaleY: 0 }}
                                     animate={{ scaleY: 1 }}
                                     transition={{ duration: 0.3 }}
                                   />
                                   {/* Speaker label */}
                                   <motion.span
-                                    className={`text-[10px] font-bold uppercase tracking-[0.15em] ${
-                                      caption.speaker === 'HOST_A' ? 'text-purple-400' : 'text-blue-400'
-                                    }`}
+                                    className={`text-[10px] font-bold uppercase tracking-[0.15em] ${caption.speaker === 'HOST_A' ? 'text-purple-400' : 'text-blue-400'
+                                      }`}
                                     initial={{ opacity: 0, y: 6 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: 0.05, duration: 0.2 }}
@@ -1075,9 +1147,8 @@ export default function ChatSession() {
                                   </motion.span>
                                   {/* Caption text — solid block */}
                                   <motion.p
-                                    className={`text-sm font-medium leading-relaxed ${
-                                      caption.speaker === 'HOST_A' ? 'text-purple-300' : 'text-blue-300'
-                                    }`}
+                                    className={`text-sm font-medium leading-relaxed ${caption.speaker === 'HOST_A' ? 'text-purple-300' : 'text-blue-300'
+                                      }`}
                                     initial={{ opacity: 0 }}
                                     animate={{ opacity: 1 }}
                                     transition={{ delay: 0.1, duration: 0.25 }}
@@ -1143,6 +1214,138 @@ export default function ChatSession() {
                     Generate Podcast
                   </button>
                   <p className="text-xs text-gray-600">Generation takes 2-4 minutes</p>
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {/* ─── Video Lecture Panel ─── */}
+          {activeFeature === 'video' && (
+            <motion.div
+              key="video"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="h-full flex flex-col"
+            >
+              {videoUrl && videoStatus === 'complete' ? (
+                <>
+                  {/* Top bar */}
+                  <div className="sticky top-0 bg-[#0a0a0a]/80 backdrop-blur-sm border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
+                    <div className="flex items-center gap-3">
+                      <Film className="w-5 h-5 text-[#7c3aed]" />
+                      <span className="font-bold text-white">Video Lecture</span>
+                    </div>
+                    <button
+                      onClick={() => { setVideoUrl(null); setVideoStatus('none'); setVideoError(null); generateVideo() }}
+                      className="flex items-center gap-1.5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:border-white/30 transition-all"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      Regenerate
+                    </button>
+                  </div>
+
+                  {/* Video Player */}
+                  <div className="flex-1 overflow-y-auto px-6 py-6">
+                    <div className="max-w-2xl mx-auto">
+                      <video
+                        controls
+                        className="w-full rounded-2xl border border-white/10 bg-black"
+                        src={`http://localhost:8000${videoUrl}`}
+                      >
+                        Your browser does not support the video tag.
+                      </video>
+                      <div className="mt-4 flex gap-3">
+                        <button
+                          onClick={() => {
+                            const a = document.createElement('a')
+                            a.href = `http://localhost:8000${videoUrl}`
+                            a.download = `video-lecture-${session.name}.mp4`
+                            a.click()
+                          }}
+                          className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-400 flex items-center justify-center gap-2 transition-all"
+                        >
+                          <Download className="w-4 h-4" />
+                          Download MP4
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : videoStatus !== 'none' && videoStatus !== 'failed' ? (
+                /* Generating state */
+                <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8">
+                  {/* Animated film icon */}
+                  <div className="relative">
+                    <Film className="w-16 h-16 text-[#7c3aed] animate-pulse" style={{ filter: 'drop-shadow(0 0 20px rgba(124,58,237,0.4))' }} />
+                    <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-purple-600 rounded-full flex items-center justify-center">
+                      <div className="w-2 h-2 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  </div>
+                  <h3 className="text-lg font-bold text-white">Generating Video</h3>
+                  {/* Progress steps */}
+                  <div className="bg-[#1a1a1a] border border-white/10 rounded-2xl p-6 max-w-md w-full">
+                    {[
+                      { key: 'generating', label: 'Extracting JSON script via Groq' },
+                      { key: 'rendering', label: 'Playwright HTML rendering' },
+                      { key: 'audio', label: 'Synthesizing Kokoro voice' },
+                      { key: 'merging', label: 'Multiplexing AV via FFmpeg' },
+                    ].map((step, i) => {
+                      const statuses = ['queued', 'generating', 'rendering', 'audio', 'merging', 'complete']
+                      const currentIdx = statuses.indexOf(videoStatus)
+                      const stepIdx = statuses.indexOf(step.key)
+
+                      // In parallel, rendering and audio might happen interchangeably.
+                      // The statuses provided by job are sequential though
+                      const isDone = stepIdx < currentIdx
+                      const isActive = stepIdx === currentIdx
+                      return (
+                        <div key={step.key} className={`flex items-center gap-3 py-2 ${i > 0 ? 'border-t border-white/5' : ''}`}>
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${isDone ? 'bg-emerald-500/20 text-emerald-400' :
+                              isActive ? 'bg-purple-500/20 text-purple-400' :
+                                'bg-white/5 text-gray-600'
+                            }`}>
+                            {isDone ? '✓' : isActive ? (
+                              <div className="w-3 h-3 border-2 border-purple-400 border-t-transparent rounded-full animate-spin" />
+                            ) : (i + 1)}
+                          </div>
+                          <span className={`text-sm ${isDone ? 'text-emerald-400' :
+                              isActive ? 'text-white font-medium' :
+                                'text-gray-600'
+                            }`}>{step.label}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p className="text-sm text-gray-400 animate-pulse">{videoProgress}</p>
+                  <p className="text-xs text-gray-600">This may take 5-15 minutes. You can leave and come back.</p>
+                </div>
+              ) : videoStatus === 'failed' ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-4 px-8">
+                  <div className="border border-red-500/30 bg-red-900/10 rounded-xl p-4 max-w-md text-center">
+                    <p className="text-sm text-red-400">{videoError || 'Video generation failed'}</p>
+                    <button onClick={() => { setVideoError(null); setVideoStatus('none'); generateVideo() }} className="mt-3 text-xs text-red-300 underline">Retry</button>
+                  </div>
+                </div>
+              ) : (
+                /* Initial generation prompt */
+                <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8">
+                  <div className="relative">
+                    <Film className="w-16 h-16 text-[#7c3aed]" style={{ filter: 'drop-shadow(0 0 20px rgba(124,58,237,0.3))' }} />
+                  </div>
+                  <h2 className="text-2xl font-bold text-white">Video Lecture</h2>
+                  <p className="text-sm text-gray-500 text-center max-w-md">
+                    Generate an animated explainer video of this lecture — utilizing dynamic HTML animations recorded in real-time, coupled with an AI narration voiceover.
+                  </p>
+                  <button
+                    onClick={generateVideo}
+                    className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-500 hover:to-purple-600 text-white font-semibold rounded-xl px-8 py-4 text-base flex items-center gap-3 shadow-lg shadow-purple-900/30 transition-all"
+                  >
+                    <Film className="w-5 h-5" />
+                    Generate Video
+                  </button>
+                  <p className="text-xs text-gray-600">Generation takes 5-15 minutes</p>
                 </div>
               )}
             </motion.div>

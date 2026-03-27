@@ -193,7 +193,7 @@ def _generate_script(transcript: str, session_title: str, context_files_text: st
     if not client:
         return ""
 
-    system_prompt = """You are a world class podcast script writer. Write a natural, engaging two-host educational podcast script based on the provided lecture transcript. The podcast should feel like two knowledgeable friends discussing the topic — not a formal lecture. Include natural conversational elements like brief acknowledgments, building on each other's points, and occasional analogies. Do not invent facts not in the transcript."""
+    system_prompt = """You are a World Class Podcast Script Writer. Write a natural, engaging two-host educational podcast script based on the provided lecture transcript. The podcast should feel like two knowledgeable friends discussing the topic — not a formal lecture. Include natural conversational elements like brief acknowledgments, building on each other's points, and occasional analogies. Do not invent facts not in the transcript."""
 
     context_section = ""
     has_context = False

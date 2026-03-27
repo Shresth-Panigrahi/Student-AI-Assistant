@@ -2,225 +2,127 @@
   {
     "id": 0,
     "speaker": "HOST_A",
-    "text": "Hey, welcome back to the show! Today we\u2019re diving into something that sounds dry but is actually the secret sauce behind every smart language app you\u2019ve ever used\u2014corpus design and analysis.",
+    "text": "So today we\u2019re diving into the wild world of corpus design\u2014basically, how you decide what texts to feed your language model so it doesn\u2019t grow up confused.",
     "startTime": 0.0,
-    "endTime": 12.85
+    "endTime": 10.225
   },
   {
     "id": 1,
     "speaker": "HOST_B",
-    "text": "Right, it\u2019s basically the art of picking and polishing the pile of text that teaches your chatbot, translator, or autocorrect how to sound human instead of robotic.",
-    "startTime": 13.25,
-    "endTime": 23.65
+    "text": "Right, and the first thing the lecture hammered home is that you can\u2019t just scoop up random tweets and call it a day; you\u2019ve got to decide up front whether you\u2019re building a social-media chatbot, a medical question-answerer, or the next great Hindi conversational agent.",
+    "startTime": 10.625,
+    "endTime": 26.025
   },
   {
     "id": 2,
     "speaker": "HOST_A",
-    "text": "Exactly. And the first fork in the road is deciding if you want supervised or unsupervised learning. Supervised means you lovingly label every sentence\u2014like tagging nouns, verbs, or whether a tweet is angry or thrilled.",
-    "startTime": 24.05,
+    "text": "Exactly, and that choice colors everything\u2014if you only crawl Bollywood forums, your bot will sound like a filmi dialogue writer, which is awesome until someone asks it about diabetes symptoms.",
+    "startTime": 26.425,
     "endTime": 39.4
   },
   {
     "id": 3,
     "speaker": "HOST_B",
-    "text": "While unsupervised is the \u201cthrow it in the pool and let the algorithm figure out how to swim\u201d approach. Both need data, but only one needs you to sit there with a highlighter.",
+    "text": "And then there\u2019s the whole \u201chomo-lingual versus multilingual\u201d angle: one language keeps life simple, but the second you add a second language you need sentence-level alignment or at least comparable documents, otherwise your translations come out like word salad.",
     "startTime": 39.8,
-    "endTime": 50.575
+    "endTime": 56.275
   },
   {
     "id": 4,
-    "speaker": "HOST_B",
-    "text": "So where does this data live? Anywhere language hangs out\u2014articles, blogs, social-media fire-hoses, even that forgotten forum about 90s video games.",
-    "startTime": 50.975,
-    "endTime": 61.275
+    "speaker": "HOST_A",
+    "text": "Yeah, the lecture warned that comparable corpora don\u2019t have to be perfect mirrors, but if the domains drift too far\u2014say, Hindi Wikipedia versus English tweets\u2014you\u2019ll teach the model that \u201cpython\u201d means both a snake and a programming language in the same breath.",
+    "startTime": 56.675,
+    "endTime": 73.825
   },
   {
     "id": 5,
-    "speaker": "HOST_A",
-    "text": "But you can\u2019t just Hoover up everything. If your goal is a Hindi customer-support bot, scraping cooking blogs won\u2019t help; the vocabulary is off-topic and the tone is way too cozy.",
-    "startTime": 61.675,
-    "endTime": 74.025
+    "speaker": "HOST_B",
+    "text": "Speaking of messy data, the privacy minefield came up next. Anytime you scrape dialogues from Reddit or WhatsApp leaks, you\u2019re one regex away from leaking phone numbers, and once that\u2019s in the wild you can\u2019t stuff it back in the bottle.",
+    "startTime": 74.225,
+    "endTime": 88.475
   },
   {
     "id": 6,
-    "speaker": "HOST_B",
-    "text": "That\u2019s why you declare your domain up front: medical, finance, social-media flamewars, whatever. Otherwise the model learns \u201clol\u201d belongs in legal contracts.",
-    "startTime": 74.425,
-    "endTime": 84.75
+    "speaker": "HOST_A",
+    "text": "So the rule of thumb is strip first, ask later: anonymize names, replace digits, nuke the emojis that can geolocate someone\u2014basically treat every corpus like it\u2019s going to end up on the front page of the newspaper.",
+    "startTime": 88.875,
+    "endTime": 103.3
   },
   {
     "id": 7,
-    "speaker": "HOST_A",
-    "text": "And once you\u2019ve narrowed the universe, you still have to balance the corpus. Think of it like a diet: too much of one nutrient\u2014say, formal news text\u2014and your bot will sound like a walking terms-of-service page.",
-    "startTime": 85.15,
-    "endTime": 98.625
+    "speaker": "HOST_B",
+    "text": "And if you\u2019re lucky enough to find pre-cleaned \u201canonymous data,\u201d you still need to eyeball it, because the lecture hinted that even \u201cpublic\u201d forums can hide personal stories that feel icky once you actually read them.",
+    "startTime": 103.7,
+    "endTime": 117.0
   },
   {
     "id": 8,
-    "speaker": "HOST_B",
-    "text": "So you mix in informal dialogues, Q&A threads, even emoji-heavy chats, then scrub out the privacy landmines\u2014phone numbers, addresses, anything that could out a real human.",
-    "startTime": 99.025,
-    "endTime": 110.725
+    "speaker": "HOST_A",
+    "text": "Once the data\u2019s ethically squeaky, you hit the next fork: supervised versus unsupervised. If you want the model to learn that \u201cartificial intelligence\u201d is a collocation, you can either feed it labeled examples or let it count co-occurrences and hope statistics do the heavy lifting.",
+    "startTime": 117.4,
+    "endTime": 135.925
   },
   {
     "id": 9,
-    "speaker": "HOST_A",
-    "text": "Anonymization isn\u2019t just polite; in a lot of places it\u2019s the law. One leaky dataset can torpedo a whole research project.",
-    "startTime": 111.125,
-    "endTime": 119.9
+    "speaker": "HOST_B",
+    "text": "That\u2019s where those PMI and T-score formulas swagger in. PMI loves the rare but meaningful duos\u2014like \u201cstrong tea\u201d\u2014while T-score gives frequent pairs like \u201cNew York\u201d their due without letting them drown everything else.",
+    "startTime": 136.325,
+    "endTime": 150.775
   },
   {
     "id": 10,
-    "speaker": "HOST_B",
-    "text": "Speaking of leaking, let\u2019s talk alignment. If you\u2019re working multilingually, you can go sentence-to-sentence\u2014like perfect parallel subtitles\u2014or just harvest comparable texts that talk about the same world events without lining up word-for-word.",
-    "startTime": 120.3,
-    "endTime": 134.9
+    "speaker": "HOST_A",
+    "text": "And the lecture swears by LLR\u2014log-likelihood ratio\u2014as the new kid on the block, because it balances both ends of the spectrum without the voodoo hand-tuning that PMI sometimes needs.",
+    "startTime": 151.175,
+    "endTime": 164.175
   },
   {
     "id": 11,
-    "speaker": "HOST_A",
-    "text": "The second option is way cheaper, but you lose the neat one-to-one training pairs. Trade-offs everywhere, right?",
-    "startTime": 135.3,
-    "endTime": 142.4
+    "speaker": "HOST_B",
+    "text": "But before any math happens, you still have to preprocess: tokenize, lowercase, lemmatize, or you\u2019ll treat \u201cTea\u201d and \u201ctea\u201d as two different words and miss the collocation entirely.",
+    "startTime": 164.575,
+    "endTime": 175.9
   },
   {
     "id": 12,
-    "speaker": "HOST_B",
-    "text": "Trade-offs are the theme song of corpus work.",
-    "startTime": 142.8,
-    "endTime": 145.95
+    "speaker": "HOST_A",
+    "text": "Right, and don\u2019t forget the n-gram step; if you only look at bigrams, you\u2019ll never catch \u201csalt and pepper\u201d as a trigram collocation, and your dinner-bot will sound like it\u2019s never seen a kitchen.",
+    "startTime": 176.3,
+    "endTime": 188.35
   },
   {
     "id": 13,
-    "speaker": "HOST_A",
-    "text": "Okay, so we\u2019ve collected, cleaned, and balanced. Now we annotate. Lemmatization turns \u201crunning\u201d into \u201crun,\u201d POS tagging marks verbs, syntactic parsing draws the family tree of every clause.",
-    "startTime": 146.35,
-    "endTime": 160.225
+    "speaker": "HOST_B",
+    "text": "Once you\u2019ve got clean, domain-specific, ethically-sanitized, language-tagged data, the lecture says you still need to balance the dialects\u2014formal news for politeness, social media for slang, maybe some scientific abstracts if you want it to sound smart at parties.",
+    "startTime": 188.75,
+    "endTime": 205.55
   },
   {
     "id": 14,
-    "speaker": "HOST_B",
-    "text": "Each extra layer is like giving the model night-vision goggles; it sees structure, not just word soup.",
-    "startTime": 160.625,
-    "endTime": 167.35
+    "speaker": "HOST_A",
+    "text": "And if you\u2019re building that Hindi chatbot example they walked through, you\u2019d deliberately mix Bollywood subtitles for tone, government FAQs for facts, and customer-support logs for question-answer structure, then run collocation stats so it knows \u201ckaise ho\u201d is casual while \u201caap kaise hain\u201d is respectful.",
+    "startTime": 205.95,
+    "endTime": 225.45
   },
   {
     "id": 15,
-    "speaker": "HOST_A",
-    "text": "And if you\u2019re feeling fancy, toss in named-entity tags or sentiment labels\u2014suddenly your bot knows that \u201cApple\u201d is a company, not just something you eat.",
-    "startTime": 167.75,
-    "endTime": 177.9
+    "speaker": "HOST_B",
+    "text": "The beauty is that all of these decisions\u2014domain, language count, privacy scrubbing, collocation measure\u2014get baked into the corpus metadata, so six months later you don\u2019t stare at your model and wonder why it thinks \u201ccoronavirus party\u201d is a normal phrase.",
+    "startTime": 225.85,
+    "endTime": 241.625
   },
   {
     "id": 16,
-    "speaker": "HOST_B",
-    "text": "All of this grunt work pays off when you start hunting collocations\u2014those stubborn word couples that stick together like \u201cmake a decision\u201d instead of \u201cdo a decision.\u201d",
-    "startTime": 178.3,
-    "endTime": 188.5
+    "speaker": "HOST_A",
+    "text": "So bottom line: corpus design isn\u2019t data entry, it\u2019s editorial choices all the way down, and every shortcut you take shows up later like a typo in a tattoo.",
+    "startTime": 242.025,
+    "endTime": 253.2
   },
   {
     "id": 17,
-    "speaker": "HOST_A",
-    "text": "Native speakers feel the difference, but a machine only spots it if you show the numbers. Raw frequency is step one: \u201cartificial intelligence\u201d popped up 1,500 times in our sample, so something\u2019s going on.",
-    "startTime": 188.9,
-    "endTime": 203.55
-  },
-  {
-    "id": 18,
     "speaker": "HOST_B",
-    "text": "But frequency alone can\u2019t tell rare yet meaningful phrases from boringly common ones. That\u2019s where the statistical spices come in\u2014PMI, T-score, and the current gold standard, LLR.",
-    "startTime": 203.95,
-    "endTime": 216.6
-  },
-  {
-    "id": 19,
-    "speaker": "HOST_A",
-    "text": "PMI loves the weirdos. If \u201cmolecular gastronomy\u201d appears only ten times but always as one chunk, PMI screams \u201ckeep these together!\u201d",
-    "startTime": 217.0,
-    "endTime": 227.05
-  },
-  {
-    "id": 20,
-    "speaker": "HOST_B",
-    "text": "T-score, on the other hand, prefers the prom-king words: if \u201cgood morning\u201d shows up zillions of times, T-score pats it on the back and says \u201csolid collocation.\u201d",
-    "startTime": 227.45,
-    "endTime": 237.5
-  },
-  {
-    "id": 21,
-    "speaker": "HOST_A",
-    "text": "And LLR\u2014log-likelihood ratio\u2014balances both ends of the spectrum, so you don\u2019t drown in either noise or unicorns.",
-    "startTime": 237.9,
-    "endTime": 246.325
-  },
-  {
-    "id": 22,
-    "speaker": "HOST_B",
-    "text": "Let\u2019s walk through the recipe. Step one: tokenize and lowercase everything so \u201cThe\u201d and \u201cthe\u201d stop pretending they\u2019re strangers.",
-    "startTime": 246.725,
-    "endTime": 255.025
-  },
-  {
-    "id": 23,
-    "speaker": "HOST_A",
-    "text": "Step two: count your n-grams\u2014bigrams, trigrams, whatever size chunk you\u2019re curious about.",
-    "startTime": 255.425,
-    "endTime": 261.775
-  },
-  {
-    "id": 24,
-    "speaker": "HOST_B",
-    "text": "Step three: run the math. Compute probabilities for each word, each pair, then plug them into PMI or LLR.",
-    "startTime": 262.175,
-    "endTime": 269.725
-  },
-  {
-    "id": 25,
-    "speaker": "HOST_A",
-    "text": "Finally, eyeball the top hits. If \u201cnot able to cancel\u201d keeps floating to the surface of your airline-chat corpus, you\u2019ve just found a collocation that\u2019s also a customer pain point\u2014gold for training.",
-    "startTime": 270.125,
-    "endTime": 282.875
-  },
-  {
-    "id": 26,
-    "speaker": "HOST_B",
-    "text": "And remember, domain matters again. \u201cVentricular tachycardia\u201d is a perfect collocation in medical notes but nonsense in a baking forum.",
-    "startTime": 283.275,
-    "endTime": 292.725
-  },
-  {
-    "id": 27,
-    "speaker": "HOST_A",
-    "text": "Right, context is king, queen, and the entire royal court. Build your corpus with intention, annotate with care, and the collocations will shine through like little linguistic gems.",
-    "startTime": 293.125,
-    "endTime": 305.525
-  },
-  {
-    "id": 28,
-    "speaker": "HOST_B",
-    "text": "So next time you yell at a chatbot for misunderstanding you, spare a thought for the poor corpus behind it\u2014someone either fed it junk or polished it to a mirror.",
-    "startTime": 305.925,
-    "endTime": 315.8
-  },
-  {
-    "id": 29,
-    "speaker": "HOST_A",
-    "text": "And if you\u2019re the one building, start small: pick your domain, balance your sources, scrub the privacy gunk, annotate what matters, then let the stats sniff out the collocations.",
-    "startTime": 316.2,
-    "endTime": 327.25
-  },
-  {
-    "id": 30,
-    "speaker": "HOST_B",
-    "text": "Do that, and your model won\u2019t just speak English\u2014it\u2019ll speak your English.",
-    "startTime": 327.65,
-    "endTime": 332.3
-  },
-  {
-    "id": 31,
-    "speaker": "HOST_B",
-    "text": "To wrap it up: corpus design is part gardening\u2014plant the right texts in the right soil\u2014and part archaeology\u2014digging through layers to uncover the hidden fossils we call collocations. Treat those steps seriously and your language model goes from caveman to Shakespeare.",
-    "startTime": 332.7,
-    "endTime": 349.6
+    "text": "To wrap, the lecture left us with a cheat-sheet: pick your domain first, anonymize second, balance genres third, then let PMI, T-score, or LLR tell you which word pairs are glued together by meaning rather than coincidence; do that and your model will sound less like a random sentence generator and more like someone you\u2019d actually want to chat with.",
+    "startTime": 253.6,
+    "endTime": 274.55
   }
 ]

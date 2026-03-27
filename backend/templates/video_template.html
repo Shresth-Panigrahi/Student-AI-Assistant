@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <title>Video Render</title>
+    <!-- Use specific fixed resolution for 1080p recording -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono&display=swap');
+        
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 1920px;
+            height: 1080px;
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #scene-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 80px;
+            box-sizing: border-box;
+        }
+
+        /* Reusable Scene Styles */
+        .scene {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            opacity: 0; /* GSAP will control this */
+            visibility: hidden;
+        }
+
+        .title-text {
+            font-size: 96px;
+            font-weight: 800;
+            background: linear-gradient(90deg, #58a6ff, #bc8cff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .subtitle-text {
+            font-size: 48px;
+            color: #8b949e;
+            text-align: center;
+        }
+
+        /* Bullet Points */
+        .bullets-container {
+            width: 70%;
+            font-size: 48px;
+            line-height: 1.6;
+            color: #e6edf3;
+        }
+        .bullet-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+            opacity: 0;
+            transform: translateX(-50px);
+        }
+        .bullet-dot {
+            color: #58a6ff;
+            margin-right: 20px;
+            font-size: 64px;
+        }
+
+        /* Equation */
+        .equation-wrapper {
+            font-size: 64px;
+            padding: 40px 80px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 20px;
+            border: 1px solid rgba(88,166,255,0.3);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Highlight */
+        .highlight-box {
+            background: rgba(188,140,255,0.15);
+            border: 4px solid #bc8cff;
+            border-radius: 30px;
+            padding: 60px 100px;
+            font-size: 72px;
+            font-weight: 800;
+            text-align: center;
+            box-shadow: 0 0 50px rgba(188,140,255,0.2);
+            color: #fff;
+        }
+
+        /* Split */
+        .split-container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            align-items: center;
+            justify-content: space-around;
+            padding: 0 100px;
+        }
+        .split-side {
+            width: 40%;
+            font-size: 48px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 20px;
+            padding: 50px;
+            height: 60%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+    </style>
+
+    <!-- Dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+
+    <div id="scene-container"></div>
+
+    <script>
+        // window.SCENE_DATA will be injected here by python.
+        // Fallback for testing purely in browser if opened directly:
+        if (!window.SCENE_DATA) {
+            window.SCENE_DATA = {
+                title: "Test Video",
+                scenes: [
+                    { type: "title", content: { text: "Animated Video Lecture Generator", subtitle: "Building with HTML + GSAP" }, duration: 4 },
+                    { type: "bullet", content: { points: ["JSON driven structure", "GSAP Timeline Animations", "Headless Playwright Recording"] }, duration: 6 }
+                ]
+            };
+        }
+
+        // We use an async function to control the sequence and await MathJax rendering
+        async function runAnimations() {
+            const container = document.getElementById('scene-container');
+            const data = window.SCENE_DATA;
+            
+            const masterTimeline = gsap.timeline({
+                onComplete: () => {
+                    console.log("RENDER_DONE_SIGNAL");
+                    window.RENDER_DONE = true;
+                }
+            });
+
+            for (let i = 0; i < data.scenes.length; i++) {
+                const sceneDef = data.scenes[i];
+                
+                // 1. Create DOM Elements
+                const sceneDiv = document.createElement('div');
+                sceneDiv.className = 'scene';
+                sceneDiv.id = `scene-${i}`;
+                
+                let tl = gsap.timeline();
+
+                // Build content based on type
+                if (sceneDef.type === "title") {
+                    sceneDiv.innerHTML = `
+                        <div class="title-text">${sceneDef.content.text}</div>
+                        ${sceneDef.content.subtitle ? `<div class="subtitle-text">${sceneDef.content.subtitle}</div>` : ''}
+                    `;
+                    // Scene animation
+                    tl.to(sceneDiv, { autoAlpha: 1, duration: 0.5 })
+                      .fromTo(sceneDiv.querySelector('.title-text'), { y: 50, opacity: 0 }, { y: 0, opacity: 1, duration: 1, ease: "back.out(1.7)" })
+                      ;
+                    if (sceneDef.content.subtitle) {
+                        tl.fromTo(sceneDiv.querySelector('.subtitle-text'), { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8 }, "-=0.5");
+                    }
+                } 
+                else if (sceneDef.type === "bullet") {
+                    let html = '<div class="bullets-container">';
+                    sceneDef.content.points.forEach((pt, idx) => {
+                        html += `<div class="bullet-item" id="scene-${i}-pt-${idx}"><span class="bullet-dot">•</span>${pt}</div>`;
+                    });
+                    html += '</div>';
+                    sceneDiv.innerHTML = html;
+                    
+                    tl.to(sceneDiv, { autoAlpha: 1, duration: 0.5 });
+                    sceneDef.content.points.forEach((_, idx) => {
+                        tl.to(`#scene-${i}-pt-${idx}`, { x: 0, opacity: 1, duration: 0.6, ease: "power2.out" }, "-=0.2");
+                    });
+                }
+                else if (sceneDef.type === "equation") {
+                    sceneDiv.innerHTML = `
+                        <div class="subtitle-text" style="margin-bottom: 50px;">Equation</div>
+                        <div class="equation-wrapper">\\[ ${sceneDef.content.latex} \\]</div>
+                    `;
+                    tl.to(sceneDiv, { autoAlpha: 1, duration: 0.5 })
+                      .fromTo(sceneDiv.querySelector('.equation-wrapper'), { scale: 0.8, opacity: 0 }, { scale: 1, opacity: 1, duration: 1, ease: "elastic.out(1, 0.7)" });
+                }
+                else if (sceneDef.type === "highlight") {
+                    sceneDiv.innerHTML = `
+                        <div class="highlight-box">${sceneDef.content.text}</div>
+                    `;
+                    tl.to(sceneDiv, { autoAlpha: 1, duration: 0.5 })
+                      .fromTo(sceneDiv.querySelector('.highlight-box'), { scale: 0.5, opacity: 0, rotationX: 45 }, { scale: 1, opacity: 1, rotationX: 0, duration: 1, transformPerspective: 800 });
+                }
+                else if (sceneDef.type === "split") {
+                    sceneDiv.innerHTML = `
+                        <div class="split-container">
+                            <div class="split-side left-side">
+                                ${sceneDef.content.left.map(item => `<div>• ${item}</div>`).join('')}
+                            </div>
+                            <div class="split-side right-side">
+                                ${sceneDef.content.right.map(item => `<div>• ${item}</div>`).join('')}
+                            </div>
+                        </div>
+                    `;
+                    tl.to(sceneDiv, { autoAlpha: 1, duration: 0.5 })
+                      .fromTo(sceneDiv.querySelector('.left-side'), { x: -100, opacity: 0 }, { x: 0, opacity: 1, duration: 0.8 })
+                      .fromTo(sceneDiv.querySelector('.right-side'), { x: 100, opacity: 0 }, { x: 0, opacity: 1, duration: 0.8 }, "-=0.6");
+                }
+                else if (sceneDef.type === "diagram") {
+                    // Fallback visually for diagrams if D3 isn't heavily scripted here
+                    sceneDiv.innerHTML = `
+                        <div class="subtitle-text" style="margin-bottom: 50px;">Diagram: ${sceneDef.content.diagram_type}</div>
+                        <div class="diagram-nodes" style="display:flex; gap: 40px;">
+                            ${(sceneDef.content.nodes || []).map(n => `<div style="padding: 30px; background: #238636; border-radius: 15px; font-size:40px;">${n}</div>`).join('')}
+                        </div>
+                    `;
+                    tl.to(sceneDiv, { autoAlpha: 1, duration: 0.5 })
+                      .fromTo(sceneDiv.querySelector('.diagram-nodes'), { y: 50, opacity: 0 }, { y: 0, opacity: 1, duration: 1 });
+                }
+                else {
+                    // Fallback
+                    sceneDiv.innerHTML = `<div class="title-text">Unknown Scene Type: ${sceneDef.type}</div>`;
+                    tl.to(sceneDiv, { autoAlpha: 1, duration: 0.5 });
+                }
+
+                container.appendChild(sceneDiv);
+                
+                // Re-typeset MathJax if equation
+                if (sceneDef.type === "equation" && window.MathJax) {
+                    await MathJax.typesetPromise([sceneDiv]);
+                }
+
+                // Add out-animation
+                // Total duration = sceneDef.duration
+                // Out animation takes 0.5s at the end
+                const holdTime = Math.max(0, sceneDef.duration - tl.duration() - 0.5);
+                tl.to(sceneDiv, { autoAlpha: 0, duration: 0.5, ease: "power2.in" }, `+=${holdTime}`);
+
+                masterTimeline.add(tl);
+            }
+        }
+
+        // Ensure MathJax is loaded before running
+        window.onload = () => {
+            // Slight delay to ensure fonts and MathJax are ready
+            setTimeout(() => {
+                runAnimations();
+            }, 500);
+        };
+    </script>
+</body>
+</html>

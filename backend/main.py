@@ -47,6 +47,8 @@ from terminology_extractor import extract_terminologies as lc_extract_terms
 from qa_generator import generate_qa as lc_generate_qa
 from flashcard_generator import generate_flashcards
 from audio_overview import generate_audio_overview, check_podcast_exists, PODCASTS_DIR
+from video_generator import start_video_generation, VIDEOS_DIR
+from job_manager import get_job_status
 
 app = FastAPI(title="Lecture Lyft API")
 
@@ -109,6 +111,9 @@ class ChatQAAnalysisRequest(BaseModel):
 class ChatAudioOverviewRequest(BaseModel):
     session_id: str
     context_files: List[Dict[str, Any]] = []
+
+class VideoGenerateRequest(BaseModel):
+    session_id: str
 
 class SignupRequest(BaseModel):
     name: str
@@ -792,6 +797,59 @@ async def stream_audio(filename: str):
     media_type = 'audio/mpeg' if filename.endswith('.mp3') else 'audio/wav'
     return FileResponse(filepath, media_type=media_type, filename=filename)
 
+@app.post("/api/video/generate")
+@limiter.limit("2/minute")
+async def generate_video_api(request: Request, body: VideoGenerateRequest):
+    """Start async video generation"""
+    session = db.get_session_by_id(body.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    transcript = session.get("transcript", "")
+    if not transcript or len(transcript) < 50:
+        return {"success": False, "message": "Transcript too short."}
+    
+    job = get_job_status(body.session_id)
+    if job and job["status"] not in ("complete", "failed", "none"):
+        return {"success": True, "message": "Already generating", "status": job["status"]}
+    
+    start_video_generation(body.session_id, session.get("name", "Lecture"), transcript)
+    return {"success": True, "message": "Started generation"}
+
+@app.get("/api/video/status/{session_id}")
+async def fetch_video_status(session_id: str):
+    """Poll video job status"""
+    # First check if the file physically exists on disk in case server restarted
+    filepath = os.path.join(VIDEOS_DIR, f"{session_id}.mp4")
+    if os.path.exists(filepath):
+        return {
+            "status": "complete",
+            "progress": 100,
+            "message": "Video recording complete",
+            "video_url": f"/api/video/{session_id}.mp4",
+            "error": None
+        }
+
+    job = get_job_status(session_id)
+    if job:
+        return {
+            "status": job["status"],
+            "progress": job.get("progress", 0),
+            "message": job.get("message", ""),
+            "video_url": job.get("video_url"),
+            "error": job.get("message") if job["status"] == "failed" else None
+        }
+        
+    return {"status": "none", "progress": 0, "message": "", "video_url": None, "error": None}
+
+@app.get("/api/video/{filename}")
+async def serve_video(filename: str):
+    filepath = os.path.join(VIDEOS_DIR, filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Video file not found")
+    return FileResponse(filepath, media_type="video/mp4", filename=filename)
+
+
 
 # WebSocket endpoint
 @app.websocket("/ws")
@@ -961,8 +1019,9 @@ async def login(request: Request, body: LoginRequest):
     }
 
 if __name__ == "__main__":
-    # Ensure podcasts directory exists
+    # Ensure background output dirs exist
     os.makedirs(PODCASTS_DIR, exist_ok=True)
+    os.makedirs(VIDEOS_DIR, exist_ok=True)
     print("🚀 Starting AI Student Assistant API on http://localhost:8000")
     print("📚 API Documentation: http://localhost:8000/docs")
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
