@@ -80,7 +80,7 @@ async def generate_audio_overview(
 
     print("🎧 Synthesizing audio with Kokoro TTS...")
     try:
-        pipeline_a = KPipeline(lang_code='a')  # American English
+        pipeline_a = KPipeline(lang_code='a', device='cpu')  # American English, CPU only
 
         all_segments = []
         timed_captions = []  # Real timestamps from Kokoro

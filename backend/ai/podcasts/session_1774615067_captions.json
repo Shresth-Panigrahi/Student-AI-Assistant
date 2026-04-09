@@ -1,0 +1,114 @@
+[
+  {
+    "id": 0,
+    "speaker": "HOST_A",
+    "text": "Hey, quick question\u2014when your phone finishes your sentence with something totally off-the-wall, what\u2019s actually happening under the hood?",
+    "startTime": 0.0,
+    "endTime": 7.925
+  },
+  {
+    "id": 1,
+    "speaker": "HOST_B",
+    "text": "Ah, the classic \u201cI meant \u2018see you soon,\u2019 not \u2018see you spoon\u2019\u201d moment. Those keyboards are still using antique n-gram models\u2014tiny frequency tables that guess the next word based on the last one or two. They\u2019re fast, but they have the memory of a goldfish.",
+    "startTime": 8.325,
+    "endTime": 23.9
+  },
+  {
+    "id": 2,
+    "speaker": "HOST_A",
+    "text": "Right, and that goldfish memory is why we now have these gigantic things called Large Language Models. They\u2019re basically the difference between a tricycle and a Tesla.",
+    "startTime": 24.3,
+    "endTime": 35.35
+  },
+  {
+    "id": 3,
+    "speaker": "HOST_B",
+    "text": "I love that analogy. So LLMs don\u2019t just count word pairs; they read the whole sentence\u2014or paragraph\u2014and ask, \u201cGiven everything I\u2019ve seen, what makes the most sense next?\u201d That shift is powered by something called the Transformer architecture.",
+    "startTime": 35.75,
+    "endTime": 50.575
+  },
+  {
+    "id": 4,
+    "speaker": "HOST_A",
+    "text": "Which, despite the name, has nothing to do with trucks or electrical grids. It comes from a 2017 paper with the delightfully cocky title \u201cAttention Is All You Need.\u201d The authors basically said, \u201cForget convolutions, forget recurrence\u2014just give us one mechanism and we\u2019ll beat everyone.\u201d",
+    "startTime": 50.975,
+    "endTime": 69.9
+  },
+  {
+    "id": 5,
+    "speaker": "HOST_B",
+    "text": "And they did. The secret sauce is attention. Picture a spotlight sweeping across the sentence: while the model writes \u201cdriving,\u201d it shines extra light on \u201cI\u201d and \u201cam\u201d to keep the grammar straight, but also on nearby words like \u201cto\u201d or \u201cthe\u201d so it doesn\u2019t accidentally predict \u201cdriving apple.\u201d",
+    "startTime": 70.3,
+    "endTime": 87.4
+  },
+  {
+    "id": 6,
+    "speaker": "HOST_A",
+    "text": "So the spotlight is tunable. Instead of one big floodlight, you get a whole bank of smaller spotlights\u2014multi-head attention. One head might specialize in subject-verb agreement, another keeps track of word order using these elegant sine curves baked into the math.",
+    "startTime": 87.8,
+    "endTime": 104.95
+  },
+  {
+    "id": 7,
+    "speaker": "HOST_B",
+    "text": "Those sine curves are the model\u2019s built-in GPS. They whisper, \u201cHey, you\u2019re at position three, act like it,\u201d so the sentence doesn\u2019t come out scrambled. And because all these heads work in parallel, the model can weigh grammar, facts, and style simultaneously rather than one after another.",
+    "startTime": 105.35,
+    "endTime": 122.45
+  },
+  {
+    "id": 8,
+    "speaker": "HOST_A",
+    "text": "That\u2019s why GPT can feel eerily coherent. It\u2019s not just predicting the next word; it\u2019s juggling dozens of micro-tasks at once, like a mentalist spinning plates. But to keep the plates from crashing, the system splits the job into two halves: an encoder that reads and a decoder that writes.",
+    "startTime": 122.85,
+    "endTime": 142.175
+  },
+  {
+    "id": 9,
+    "speaker": "HOST_B",
+    "text": "Think of the encoder as the friend who speed-reads the exam question and whispers the gist to you. The decoder then answers step by step, word by word. The catch is, the decoder must not peek at the future words it hasn\u2019t written yet.",
+    "startTime": 142.575,
+    "endTime": 157.275
+  },
+  {
+    "id": 10,
+    "speaker": "HOST_A",
+    "text": "Enter masked attention\u2014basically a blindfold. While generating \u201cI am driving,\u201d the model literally hides everything after \u201cdriving\u201d so it can\u2019t cheat and see \u201ccar\u201d waiting in the wings. That forces it to learn real patterns instead of memorizing the answers.",
+    "startTime": 157.675,
+    "endTime": 174.775
+  },
+  {
+    "id": 11,
+    "speaker": "HOST_B",
+    "text": "It\u2019s like doing a jigsaw puzzle with the picture on the box face-down. You have to rely on shape and color clues, so when a new puzzle arrives you can still fit the pieces together. That constraint is what makes the model generalize so well to text it\u2019s never seen.",
+    "startTime": 175.175,
+    "endTime": 191.25
+  },
+  {
+    "id": 12,
+    "speaker": "HOST_A",
+    "text": "And generalize it does. Once you stack enough layers, feed it most of the internet, and crank the parameter count into the billions, you get that spooky fluency we now call GPT-3 or 4. All of that traces back to the humble decision to let attention do the heavy lifting.",
+    "startTime": 191.65,
+    "endTime": 209.575
+  },
+  {
+    "id": 13,
+    "speaker": "HOST_B",
+    "text": "So the next time your phone suggests \u201cspoon\u201d instead of \u201csoon,\u201d you can blame tiny n-grams. But when a chatbot nails your question about quantum espresso, you\u2019re watching the Transformer era in action\u2014spotlights, blindfolds, sine waves and all.",
+    "startTime": 209.975,
+    "endTime": 224.75
+  },
+  {
+    "id": 14,
+    "speaker": "HOST_A",
+    "text": "Exactly. And the wild part is we\u2019re still in the early innings. Researchers are already playing with tweaks\u2014sparse attention, retrieval plugs, you name it\u2014so the tricycle-to-Tesla leap might look like a golf cart compared to what\u2019s coming.",
+    "startTime": 225.15,
+    "endTime": 240.275
+  },
+  {
+    "id": 15,
+    "speaker": "HOST_B",
+    "text": "For now, though, the takeaway is simple: attention really is all you need to turn next-word guessing into something that feels like thinking.",
+    "startTime": 240.675,
+    "endTime": 249.05
+  }
+]

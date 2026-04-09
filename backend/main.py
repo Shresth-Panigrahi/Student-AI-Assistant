@@ -48,6 +48,8 @@ from qa_generator import generate_qa as lc_generate_qa
 from flashcard_generator import generate_flashcards
 from audio_overview import generate_audio_overview, check_podcast_exists, PODCASTS_DIR
 
+from transcript_refiner import refine_transcript
+
 app = FastAPI(title="Lecture Lyft API")
 
 # CORS middleware
@@ -289,101 +291,40 @@ async def clear_session():
 async def save_session(request: Request, body: SaveSessionRequest):
     """Save the current session with refined transcript"""
     session_id = f"session_{int(datetime.now().timestamp())}"
-    
-    # Use provided name or generate default
+
     if body.name and body.name.strip():
         session_name = body.name.strip()
     else:
         stats = db.get_database_stats()
         session_name = f"Session {stats['sessions'] + 1}"
-    
-    # Refine the transcript before saving
+
     refined_transcript = body.transcript
-    
-    if is_ollama_available() and len(body.transcript.strip()) > 50:
+    was_refined = False
+
+    if _groq_client and len(body.transcript.strip()) > 50:
         try:
             print(f"🔄 Refining transcript ({len(body.transcript)} chars)...")
-            
-            prompt = f"""You are a professional transcript editor. Clean up this lecture transcript by removing ALL repetitions and errors.
-
-STRICT RULES:
-1. Remove ALL repeated words (even if separated by other words)
-2. Remove ALL repeated sentences or phrases
-3. Merge similar sentences into one clear sentence
-4. Fix grammar and transcription errors
-5. Keep the original meaning and educational content
-6. Do NOT add new information
-7. Do NOT add explanations or commentary
-8. Output ONLY the cleaned transcript
-
-EXAMPLES:
-
-Input: "The OSI model is a 7 layer framework. The OSI model is a 7 layer framework that standardizes network communication."
-Output: "The OSI model is a 7 layer framework that standardizes network communication."
-
-Input: "It has seven layers. Seven layers in total. Each layer performs specific functions. Each layer performs specific functions like transmission."
-Output: "It has seven layers in total. Each layer performs specific functions like transmission."
-
-Input: "network network network network systems"
-Output: "network systems"
-
-Input: "The physical layer handles transmission. The data link layer handles transmission. The network layer handles transmission."
-Output: "The physical layer, data link layer, and network layer each handle transmission."
-
-Now clean this transcript. Remove ALL repetitions and merge similar content:
-
-{body.transcript}
-
-CLEANED TRANSCRIPT:"""
-            
-            if _groq_client:
-                completion = _groq_client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": "You are a professional transcript editor."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    model="moonshotai/kimi-k2-instruct-0905",
-                    temperature=0.3
-                )
-                refined_transcript = completion.choices[0].message.content.strip()
-            else:
-                print("⚠️  Groq client not initialized - skipping refinement")
-            
-            # Remove common LLM prefixes
-            prefixes_to_remove = [
-                "Here is the cleaned transcript:",
-                "Here's the cleaned transcript:",
-                "Cleaned transcript:",
-                "CLEANED TRANSCRIPT:",
-                "The cleaned transcript is:",
-            ]
-            
-            for prefix in prefixes_to_remove:
-                if refined_transcript.startswith(prefix):
-                    refined_transcript = refined_transcript[len(prefix):].strip()
-                    break
-            
-            print(f"✅ Transcript refined: {len(refined_transcript)} chars")
-            print(f"📝 Original: {body.transcript[:100]}...")
-            print(f"✨ Refined: {refined_transcript[:100]}...")
-                
+            refined_transcript, was_refined = refine_transcript(body.transcript, _groq_client)
+            print(f"✅ Final transcript: {len(refined_transcript)} chars (refined={was_refined})")
         except Exception as e:
-            print(f"❌ Refinement error: {e}, using original transcript")
-    
-    # Save to database with refined transcript
+            print(f"❌ Refinement pipeline error: {e} — using original transcript")
+    else:
+        if not _groq_client:
+            print("⚠️  Groq client not initialized — skipping refinement")
+
     success = db.create_session(
         session_id=session_id,
         name=session_name,
         transcript=refined_transcript,
         chat_messages=body.chat
     )
-    
+
     if success:
         return {
             "success": True,
             "sessionId": session_id,
             "message": "Session saved with refined transcript",
-            "refined": refined_transcript != body.transcript
+            "refined": was_refined
         }
     else:
         raise HTTPException(status_code=500, detail="Failed to save session")
