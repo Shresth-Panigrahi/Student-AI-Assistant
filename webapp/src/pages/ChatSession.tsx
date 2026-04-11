@@ -4,11 +4,13 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, Sparkles, ChevronRight, ChevronDown, ChevronUp, ChevronLeft,
   Headphones, FileText, Layers, HelpCircle, GitFork, Lock, Plus, X,
-  RefreshCw, Download, Play, Pause, Trophy
+  RefreshCw, Download, Play, Pause, Trophy, Share2, Database, Send
 } from 'lucide-react'
 import { api } from '@/services/api'
 import { format } from 'date-fns'
 import axios from 'axios'
+import ConceptGraph, { CATEGORY_COLORS } from '@/components/ConceptGraph'
+import type { GraphNode, GraphEdge } from '@/components/ConceptGraph'
 
 // ─── Types ───────────────────────────────────────────────────
 interface SessionData {
@@ -49,7 +51,16 @@ interface CaptionSegment {
   endTime: number
 }
 
-type ActiveFeature = null | 'audio' | 'report' | 'flashcards' | 'qa'
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  sources?: { text: string; relevance: number }[]
+  rag_used?: boolean
+  think_mode?: boolean
+  timestamp?: Date
+}
+
+type ActiveFeature = null | 'audio' | 'report' | 'flashcards' | 'qa' | 'graph' | 'chat'
 
 // ─── Component ───────────────────────────────────────────────
 export default function ChatSession() {
@@ -106,6 +117,34 @@ export default function ChatSession() {
   const [activeCaptionId, setActiveCaptionId] = useState<number | null>(null)
   const captionsRef = useRef<CaptionSegment[]>([])
 
+  // Concept Graph
+  const [graphData, setGraphData] = useState<{
+    nodes: GraphNode[]
+    edges: GraphEdge[]
+    central_concept: string
+    summary: string
+    node_count: number
+    edge_count: number
+  } | null>(null)
+  const [graphLoading, setGraphLoading] = useState(false)
+  const [graphError, setGraphError] = useState<string | null>(null)
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
+  const [categoryFilter, setCategoryFilter] = useState<string[]>([
+    'definition', 'formula', 'algorithm', 'application', 'process', 'principle'
+  ])
+  const [graphFromCache, setGraphFromCache] = useState(false)
+
+  // RAG Status
+  const [ragStatus, setRagStatus] = useState<{ indexed: boolean; chunk_count: number } | null>(null)
+
+  // Chat Q&A (session-aware with RAG)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatThinkMode, setChatThinkMode] = useState(false)
+  const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
   // ─── Load Session ────────────────────────────────────────────
   useEffect(() => {
     if (!sessionId) return
@@ -120,6 +159,36 @@ export default function ChatSession() {
       }
     }
     load()
+  }, [sessionId])
+
+  // ─── Poll RAG status ────────────────────────────────────────
+  useEffect(() => {
+    if (!sessionId) return
+    let cancelled = false
+    let intervalId: ReturnType<typeof setInterval> | null = null
+
+    const checkStatus = async () => {
+      try {
+        const status = await api.getRagStatus(sessionId)
+        if (!cancelled) {
+          setRagStatus(status)
+          if (status.indexed && intervalId) {
+            clearInterval(intervalId)
+            intervalId = null
+          }
+        }
+      } catch (e) {
+        console.error('RAG status check failed:', e)
+      }
+    }
+
+    checkStatus()
+    intervalId = setInterval(checkStatus, 10000)
+
+    return () => {
+      cancelled = true
+      if (intervalId) clearInterval(intervalId)
+    }
   }, [sessionId])
 
   // ─── Fetch captions from backend ──────────────────────────
@@ -180,7 +249,13 @@ export default function ChatSession() {
     if (activeFeature === 'flashcards' && flashcards.length === 0 && !flashcardsLoading) fetchFlashcards()
     if (activeFeature === 'qa' && qaQuestions.length === 0 && !qaLoading) fetchQA()
     if (activeFeature === 'audio' && !audioUrl && !generating && !audioLoading) checkAudio()
+    if (activeFeature === 'graph' && !graphData && !graphLoading) fetchGraph()
   }, [activeFeature])
+
+  // ─── Auto-scroll chat ──────────────────────────────────────
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages])
 
   // ─── API Calls ──────────────────────────────────────────────
   const fetchReport = async (force = false) => {
@@ -284,6 +359,74 @@ export default function ChatSession() {
     }
   }
 
+  const fetchGraph = async (force = false) => {
+    if (!sessionId) return
+    setGraphLoading(true)
+    setGraphError(null)
+    try {
+      // Check cache first
+      if (!force) {
+        const cached = await api.getConceptGraph(sessionId)
+        if (cached.exists && cached.graph) {
+          setGraphData(cached.graph)
+          setGraphFromCache(true)
+          setGraphLoading(false)
+          return
+        }
+      }
+      // Generate new
+      const res = await api.generateConceptGraph(sessionId, contextFiles, force)
+      if (res.success) {
+        setGraphData(res.graph)
+        setGraphFromCache(!!res.from_cache)
+      } else {
+        setGraphError(res.message || 'Failed to generate concept graph')
+      }
+    } catch (e: any) {
+      setGraphError(e.message || 'Network error')
+    } finally {
+      setGraphLoading(false)
+    }
+  }
+
+  // ─── Chat Q&A ──────────────────────────────────────────────
+  const handleChatSend = async () => {
+    if (!chatInput.trim() || !sessionId || chatLoading) return
+
+    const userMsg: ChatMessage = {
+      role: 'user',
+      content: chatInput.trim(),
+      timestamp: new Date()
+    }
+    setChatMessages(prev => [...prev, userMsg])
+    setChatInput('')
+    setChatLoading(true)
+
+    try {
+      const res = await api.askSessionQuestion(userMsg.content, sessionId, chatThinkMode)
+      const assistantMsg: ChatMessage = {
+        role: 'assistant',
+        content: res.answer,
+        sources: res.sources || [],
+        rag_used: res.rag_used || false,
+        think_mode: res.think_mode || false,
+        timestamp: new Date()
+      }
+      setChatMessages(prev => [...prev, assistantMsg])
+    } catch (e: any) {
+      const errorMsg: ChatMessage = {
+        role: 'assistant',
+        content: '❌ Failed to get answer. Please try again.',
+        sources: [],
+        rag_used: false,
+        timestamp: new Date()
+      }
+      setChatMessages(prev => [...prev, errorMsg])
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
   // ─── File handling ─────────────────────────────────────────
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -327,6 +470,19 @@ export default function ChatSession() {
     }, 300)
   }, [currentCardIndex, flashcards.length, cardResults])
 
+  // ─── Graph filtering ──────────────────────────────────────
+  const filteredGraphNodes = graphData
+    ? graphData.nodes.filter(n => categoryFilter.includes(n.category))
+    : []
+  const filteredNodeIds = new Set(filteredGraphNodes.map(n => n.id))
+  const filteredGraphEdges = graphData
+    ? graphData.edges.filter(e => {
+      const src = typeof e.source === 'string' ? e.source : (e.source as any).id
+      const tgt = typeof e.target === 'string' ? e.target : (e.target as any).id
+      return filteredNodeIds.has(src) && filteredNodeIds.has(tgt)
+    })
+    : []
+
   // ─── Helpers ───────────────────────────────────────────────
   const wordCount = session?.transcript?.split(' ').length || 0
   const fmtTime = (s: number) => {
@@ -335,6 +491,29 @@ export default function ChatSession() {
     return `${m}:${sec.toString().padStart(2, '0')}`
   }
   const fmtSize = (b: number) => `${(b / 1024).toFixed(0)} KB`
+
+  // ─── Toggle category filter ────────────────────────────────
+  const toggleCategory = (cat: string) => {
+    setCategoryFilter(prev =>
+      prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+    )
+  }
+
+  // ─── Get connected edges for a node ────────────────────────
+  const getConnectedEdges = (nodeId: string) => {
+    if (!graphData) return []
+    return graphData.edges.filter(e => {
+      const src = typeof e.source === 'string' ? e.source : (e.source as any).id
+      const tgt = typeof e.target === 'string' ? e.target : (e.target as any).id
+      return src === nodeId || tgt === nodeId
+    })
+  }
+
+  const getNodeLabel = (nodeId: string) => {
+    if (!graphData) return nodeId
+    const node = graphData.nodes.find(n => n.id === nodeId)
+    return node?.label || nodeId
+  }
 
   // ─── Render: Loading ───────────────────────────────────────
   if (sessionLoading) {
@@ -353,6 +532,8 @@ export default function ChatSession() {
   }
 
   // ─── Feature Cards Data ────────────────────────────────────
+  const categoryLabels = ['definition', 'formula', 'algorithm', 'application', 'process', 'principle'] as const
+
   const featureCards: {
     id: ActiveFeature
     icon: React.ReactNode
@@ -387,6 +568,21 @@ export default function ChatSession() {
       subtitle: 'Expected exam questions'
     },
     {
+      id: 'graph',
+      icon: <Share2 className="w-5 h-5 text-[#7c3aed]" />,
+      title: 'Concept Graph',
+      subtitle: 'Knowledge map of this lecture'
+    },
+    {
+      id: 'chat',
+      icon: <Send className="w-5 h-5 text-[#7c3aed]" />,
+      title: 'Ask AI',
+      subtitle: 'RAG-powered Q&A chat',
+      badge: ragStatus?.indexed
+        ? { text: 'AI Enhanced', style: 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/30' }
+        : undefined
+    },
+    {
       id: null,
       icon: <GitFork className="w-5 h-5 text-[#7c3aed] rotate-90" />,
       title: 'Mindmap',
@@ -411,6 +607,15 @@ export default function ChatSession() {
               <ArrowLeft className="w-4 h-4" />
             </button>
             <h1 className="text-sm font-bold text-white truncate flex-1">{session.name}</h1>
+            {/* RAG status indicator */}
+            {ragStatus?.indexed ? (
+              <span className="bg-emerald-900/30 border border-emerald-500/30 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1">
+                <Database className="w-2.5 h-2.5" />
+                AI Enhanced
+              </span>
+            ) : ragStatus && !ragStatus.indexed ? (
+              <span className="text-[10px] text-gray-600 animate-pulse">Indexing...</span>
+            ) : null}
           </div>
           <p className="text-xs text-gray-500 ml-9">
             {format(new Date(session.timestamp), 'MMM dd, yyyy • HH:mm')}
@@ -523,13 +728,13 @@ export default function ChatSession() {
               <h2 className="text-2xl font-bold text-white text-center">{session.name}</h2>
               <p className="text-sm text-gray-500">{wordCount} words in transcript</p>
               <div className="flex flex-wrap gap-3 justify-center">
-                {(['audio', 'report', 'flashcards', 'qa'] as ActiveFeature[]).map(f => (
+                {(['audio', 'report', 'flashcards', 'qa', 'graph', 'chat'] as ActiveFeature[]).map(f => (
                   <button
                     key={f}
                     onClick={() => setActiveFeature(f)}
                     className="px-4 py-2 rounded-full border border-purple-500/30 text-sm text-purple-300 hover:bg-purple-900/20 hover:border-purple-500/50 transition-all duration-200"
                   >
-                    {f === 'audio' ? 'Audio Overview' : f === 'report' ? 'Lecture Report' : f === 'flashcards' ? 'Flash Cards' : 'Q&A Analysis'}
+                    {f === 'audio' ? 'Audio Overview' : f === 'report' ? 'Lecture Report' : f === 'flashcards' ? 'Flash Cards' : f === 'qa' ? 'Q&A Analysis' : f === 'graph' ? 'Concept Graph' : 'Ask AI'}
                   </button>
                 ))}
               </div>
@@ -1145,6 +1350,302 @@ export default function ChatSession() {
                   <p className="text-xs text-gray-600">Generation takes 2-4 minutes</p>
                 </div>
               )}
+            </motion.div>
+          )}
+
+          {/* ─── Concept Graph Panel ─── */}
+          {activeFeature === 'graph' && (
+            <motion.div
+              key="graph"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="h-full flex flex-col"
+            >
+              {/* Top bar */}
+              <div className="sticky top-0 bg-[#0a0a0a]/80 backdrop-blur-sm border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
+                <div className="flex items-center gap-3">
+                  <Share2 className="w-5 h-5 text-[#7c3aed]" />
+                  <span className="font-bold text-white">Concept Graph</span>
+                  {graphData && (
+                    <span className="text-xs text-gray-500">{graphData.node_count} nodes · {graphData.edge_count} edges</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {graphFromCache && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-800 text-gray-400">Cached</span>
+                  )}
+                  <button
+                    onClick={() => fetchGraph(true)}
+                    disabled={graphLoading}
+                    className="flex items-center gap-1.5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:border-white/30 transition-all"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${graphLoading ? 'animate-spin' : ''}`} />
+                    Regenerate
+                  </button>
+                </div>
+              </div>
+
+              {/* Content */}
+              {graphLoading ? (
+                <div className="flex-1 flex flex-col items-center justify-center gap-4">
+                  <div className="relative w-32 h-32">
+                    <div className="absolute inset-0 rounded-full bg-purple-500/10 animate-ping" />
+                    <div className="absolute inset-4 rounded-full bg-purple-500/20 animate-pulse" />
+                    <div className="absolute inset-8 rounded-full bg-purple-500/30 animate-pulse" style={{ animationDelay: '0.5s' }} />
+                    <div className="absolute inset-12 rounded-full bg-purple-500/40" />
+                  </div>
+                  <p className="text-sm text-gray-500 animate-pulse">Analyzing lecture concepts...</p>
+                </div>
+              ) : graphError ? (
+                <div className="flex-1 flex items-center justify-center px-8">
+                  <div className="border border-red-500/30 bg-red-900/10 rounded-xl p-4 max-w-md text-center">
+                    <p className="text-sm text-red-400">{graphError}</p>
+                    <button onClick={() => fetchGraph(true)} className="mt-2 text-xs text-red-300 underline">Retry</button>
+                  </div>
+                </div>
+              ) : graphData ? (
+                <div className="flex-1 flex overflow-hidden relative">
+                  {/* Left: D3 Canvas (75%) */}
+                  <div className="flex-[3] h-full relative bg-[#0d0d0d]">
+                    <ConceptGraph
+                      nodes={filteredGraphNodes}
+                      edges={filteredGraphEdges}
+                      centralConcept={graphData.central_concept}
+                      onNodeClick={(node) => setSelectedNode(node)}
+                    />
+                  </div>
+
+                  {/* Right: Sidebar (25%) */}
+                  <div className="w-[260px] min-w-[200px] border-l border-white/5 bg-[#111111] overflow-y-auto flex flex-col">
+                    {/* Category Filters */}
+                    <div className="p-4 border-b border-white/5">
+                      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Filter</h3>
+                      <div className="flex flex-wrap gap-2">
+                        {categoryLabels.map(cat => {
+                          const active = categoryFilter.includes(cat)
+                          const color = CATEGORY_COLORS[cat] || '#7c3aed'
+                          return (
+                            <button
+                              key={cat}
+                              onClick={() => toggleCategory(cat)}
+                              className="text-[10px] px-2.5 py-1 rounded-full font-medium capitalize transition-all border"
+                              style={{
+                                backgroundColor: active ? `${color}30` : 'rgba(255,255,255,0.03)',
+                                borderColor: active ? `${color}60` : 'rgba(255,255,255,0.1)',
+                                color: active ? color : 'rgb(107,114,128)'
+                              }}
+                            >
+                              {cat}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Node Detail */}
+                    <div className="p-4 flex-1">
+                      {selectedNode ? (
+                        <div>
+                          <h3 className="text-sm font-semibold text-white mb-1">{selectedNode.label}</h3>
+                          <span
+                            className="text-[10px] px-2 py-0.5 rounded-full font-medium capitalize inline-block mb-2"
+                            style={{
+                              backgroundColor: `${CATEGORY_COLORS[selectedNode.category] || '#7c3aed'}30`,
+                              color: CATEGORY_COLORS[selectedNode.category] || '#7c3aed'
+                            }}
+                          >
+                            {selectedNode.category}
+                          </span>
+                          {selectedNode.definition && (
+                            <p className="text-xs text-gray-300 leading-relaxed mt-2 mb-4">{selectedNode.definition}</p>
+                          )}
+
+                          {/* Connected edges */}
+                          <h4 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Connections</h4>
+                          <div className="space-y-1.5">
+                            {getConnectedEdges(selectedNode.id).map((edge, i) => {
+                              const src = typeof edge.source === 'string' ? edge.source : (edge.source as any).id
+                              const tgt = typeof edge.target === 'string' ? edge.target : (edge.target as any).id
+                              const otherNodeId = src === selectedNode.id ? tgt : src
+                              const direction = src === selectedNode.id ? '→' : '←'
+                              return (
+                                <div key={i} className="text-xs text-gray-500 flex items-center gap-1.5">
+                                  <span className="text-gray-600">{direction}</span>
+                                  <span className="text-gray-400">{edge.label}</span>
+                                  <span className="text-gray-300">{getNodeLabel(otherNodeId)}</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="h-full flex items-center justify-center">
+                          <p className="text-xs text-gray-600 text-center">Click a node to explore</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Summary pill at bottom */}
+                  {graphData.summary && (
+                    <div className="absolute bottom-4 left-0 right-[260px] flex justify-center z-20 pointer-events-none">
+                      <div className="bg-white/5 border border-white/8 rounded-full px-4 py-1.5 text-xs text-gray-400 text-center max-w-md backdrop-blur-sm">
+                        {graphData.summary}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </motion.div>
+          )}
+
+          {/* ─── Chat Q&A Panel (RAG-powered) ─── */}
+          {activeFeature === 'chat' && (
+            <motion.div
+              key="chat"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="h-full flex flex-col"
+            >
+              {/* Top bar */}
+              <div className="sticky top-0 bg-[#0a0a0a]/80 backdrop-blur-sm border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
+                <div className="flex items-center gap-3">
+                  <Send className="w-5 h-5 text-[#7c3aed]" />
+                  <span className="font-bold text-white">Ask AI</span>
+                  {ragStatus?.indexed && (
+                    <span className="bg-emerald-900/30 border border-emerald-500/30 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Database className="w-2.5 h-2.5" />
+                      AI Enhanced · {ragStatus.chunk_count} chunks
+                    </span>
+                  )}
+                </div>
+                {/* Think mode toggle */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={chatThinkMode}
+                    onChange={(e) => setChatThinkMode(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded border-gray-600 bg-[#1a1a1a] text-purple-600 focus:ring-purple-500 focus:ring-offset-0"
+                  />
+                  <span className="text-[10px] text-gray-400">
+                    {chatThinkMode ? '🧠 Think Mode' : '📄 Transcript Only'}
+                  </span>
+                </label>
+              </div>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+                {chatMessages.length === 0 && (
+                  <div className="h-full flex flex-col items-center justify-center gap-4 text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-purple-500/10 flex items-center justify-center">
+                      <Send className="w-8 h-8 text-purple-400" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-white">Ask about this lecture</h3>
+                    <p className="text-sm text-gray-500 max-w-md">
+                      {ragStatus?.indexed
+                        ? 'AI Enhanced mode active — your questions are answered using precise semantic retrieval from the lecture transcript.'
+                        : 'Ask any question about the lecture content. The AI will search through the transcript to find relevant answers.'}
+                    </p>
+                  </div>
+                )}
+
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] ${msg.role === 'user' ? 'order-last' : ''}`}>
+                      <div className={`rounded-2xl px-4 py-3 ${
+                        msg.role === 'user'
+                          ? 'bg-purple-600/20 border border-purple-500/20'
+                          : 'bg-[#1a1a1a] border border-white/[0.08]'
+                      }`}>
+                        <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                      </div>
+
+                      {/* RAG indicator + timestamp */}
+                      {msg.role === 'assistant' && (
+                        <div className="flex items-center gap-2 mt-1.5 ml-1">
+                          {msg.rag_used && (
+                            <div className="flex items-center gap-1">
+                              <Database className="w-2.5 h-2.5 text-purple-400" />
+                              <span className="text-[10px] text-purple-400">RAG</span>
+                            </div>
+                          )}
+                          {msg.think_mode && (
+                            <span className="text-[10px] text-amber-400">🧠 Think</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Source citations */}
+                      {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
+                        <div className="mt-2 ml-1">
+                          <button
+                            onClick={() => setExpandedSources(prev => ({ ...prev, [i]: !prev[i] }))}
+                            className="flex items-center gap-1 text-[10px] text-gray-600 hover:text-gray-400 transition-all"
+                          >
+                            <ChevronDown className={`w-3 h-3 transition-transform ${expandedSources[i] ? 'rotate-180' : ''}`} />
+                            View sources ({msg.sources.length})
+                          </button>
+                          {expandedSources[i] && (
+                            <div className="mt-2 space-y-1.5">
+                              {msg.sources.slice(0, 3).map((src, j) => (
+                                <div key={j} className="bg-white/[0.03] border border-white/[0.08] rounded-lg p-2">
+                                  <p className="text-[10px] text-gray-500 leading-relaxed">{src.text}</p>
+                                  <div className="mt-1.5 h-0.5 rounded-full bg-purple-500/20 overflow-hidden">
+                                    <div
+                                      className="h-full rounded-full bg-purple-500/60"
+                                      style={{ width: `${Math.min(src.relevance * 100, 100)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {chatLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '0.1s' }} />
+                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '0.2s' }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Input */}
+              <div className="border-t border-white/5 px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleChatSend()}
+                    placeholder={chatThinkMode ? 'Ask anything about this lecture...' : 'Ask about the transcript...'}
+                    className="flex-1 bg-[#1a1a1a] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/40 transition-all"
+                    disabled={chatLoading}
+                  />
+                  <button
+                    onClick={handleChatSend}
+                    disabled={chatLoading || !chatInput.trim()}
+                    className="w-10 h-10 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all"
+                  >
+                    <Send className="w-4 h-4 text-white" />
+                  </button>
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

@@ -109,4 +109,58 @@ export const api = {
     const response = await axios.post(`${API_BASE}/auth/signup`, data)
     return response.data
   },
+
+  // RAG Status
+  getRagStatus: async (sessionId: string) => {
+    const response = await axios.get(`${API_BASE}/rag/status/${sessionId}`)
+    return response.data
+  },
+
+  // Concept Graph
+  getConceptGraph: async (sessionId: string) => {
+    const response = await axios.get(`${API_BASE}/chat/concept-graph/${sessionId}`)
+    return response.data
+  },
+
+  generateConceptGraph: async (sessionId: string, contextFiles: any[] = [], forceRegenerate = false) => {
+    const response = await axios.post(`${API_BASE}/chat/concept-graph`, {
+      session_id: sessionId,
+      context_files: contextFiles,
+      force_regenerate: forceRegenerate
+    })
+    return response.data
+  },
+
+  // Session-aware Q&A (uses RAG when session_id is provided)
+  askSessionQuestion: async (question: string, sessionId: string, thinkMode: boolean = false) => {
+    const response = await axios.post(`${API_BASE}/qa/ask`, {
+      question,
+      session_id: sessionId,
+      think_mode: thinkMode
+    })
+    return response.data
+  },
+
+  // Recording Enhancement
+  enhanceWithRecording: async (sessionId: string, formData: FormData, onUploadProgress?: (e: any) => void) => {
+    const response = await axios.post(
+      `${API_BASE}/session/${sessionId}/enhance-recording`,
+      formData,
+      {
+        onUploadProgress,
+        timeout: 600000  // 10 minute timeout for long recordings
+      }
+    )
+    return response.data
+  },
+
+  getEnhancementStatus: async (sessionId: string) => {
+    const response = await axios.get(`${API_BASE}/session/${sessionId}/enhancement-status`)
+    return response.data
+  },
+
+  getOriginalTranscript: async (sessionId: string) => {
+    const response = await axios.get(`${API_BASE}/session/${sessionId}/original-transcript`)
+    return response.data
+  },
 }

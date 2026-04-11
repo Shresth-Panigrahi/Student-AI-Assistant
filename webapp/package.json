@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@studio-freight/react-lenis": "^0.0.47",
+    "@types/d3": "^7.4.3",
     "axios": "^1.6.2",
+    "d3": "^7.9.0",
     "date-fns": "^2.30.0",
     "framer-motion": "^10.16.16",
     "gsap": "^3.12.4",

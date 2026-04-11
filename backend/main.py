@@ -1,10 +1,12 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
 import os
+import shutil
+import subprocess
 from datetime import datetime
 import asyncio
 import uvicorn
@@ -18,6 +20,9 @@ from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from fastapi import Request
+
+# Import recording enhancer
+from recording_enhancer import enhance_with_recording, TEMP_DIR as RECORDING_TEMP_DIR, SUPPORTED_AUDIO, SUPPORTED_VIDEO
 
 load_dotenv()
 try:
@@ -49,6 +54,12 @@ from flashcard_generator import generate_flashcards
 from audio_overview import generate_audio_overview, check_podcast_exists, PODCASTS_DIR
 
 from transcript_refiner import refine_transcript
+
+# Import RAG pipeline
+from rag_pipeline import rag_pipeline
+
+# Import concept graph generator
+from concept_graph import generate_concept_graph
 
 app = FastAPI(title="Lecture Lyft API")
 
@@ -82,6 +93,7 @@ transcription_queue = []
 class QuestionRequest(BaseModel):
     question: str
     think_mode: bool = False
+    session_id: Optional[str] = None  # For saved-session RAG Q&A
 
 class SaveSessionRequest(BaseModel):
     transcript: str
@@ -111,6 +123,11 @@ class ChatQAAnalysisRequest(BaseModel):
 class ChatAudioOverviewRequest(BaseModel):
     session_id: str
     context_files: List[Dict[str, Any]] = []
+
+class ConceptGraphRequest(BaseModel):
+    session_id: str
+    context_files: List[Dict[str, Any]] = []
+    force_regenerate: bool = False
 
 class SignupRequest(BaseModel):
     name: str
@@ -288,7 +305,7 @@ async def clear_session():
 
 @app.post("/api/session/save")
 @limiter.limit("5/minute")
-async def save_session(request: Request, body: SaveSessionRequest):
+async def save_session(request: Request, body: SaveSessionRequest, background_tasks: BackgroundTasks):
     """Save the current session with refined transcript"""
     session_id = f"session_{int(datetime.now().timestamp())}"
 
@@ -320,6 +337,15 @@ async def save_session(request: Request, body: SaveSessionRequest):
     )
 
     if success:
+        # Trigger RAG indexing as a background task (non-blocking)
+        background_tasks.add_task(
+            rag_pipeline.index_session,
+            session_id=session_id,
+            transcript=refined_transcript,
+            session_title=session_name
+        )
+        print(f"📦 RAG indexing queued as background task for {session_id}")
+
         return {
             "success": True,
             "sessionId": session_id,
@@ -348,43 +374,96 @@ async def delete_session(session_id: str):
     """Delete a session from database"""
     success = db.delete_session(session_id)
     if success:
+        # Also delete RAG index
+        await rag_pipeline.delete_session_index(session_id)
         return {"success": True, "message": "Session deleted successfully"}
     raise HTTPException(status_code=404, detail="Session not found")
 
 @app.post("/api/qa/ask")
 @limiter.limit("20/minute")
 async def ask_question(request: Request, body: QuestionRequest):
-    """Ask a question to the AI based on transcript context"""
-    
-    # Check if Ollama is available
+    """Ask a question to the AI based on transcript context.
+    If session_id is provided, uses RAG for precise retrieval.
+    Otherwise falls back to full-transcript mode (live recording).
+    """
+    # Check if Groq is available
     if not is_ollama_available():
         return {
             "success": False,
             "question": body.question,
-            "answer": "Ollama is not available. Please start Ollama with: ollama serve"
+            "answer": "Groq API is not available. Please check your GROQ_API_KEY."
         }
-    
-    # Get current transcript
+
+    chatbot = get_chatbot()
+
+    # ─── RAG mode: saved session with session_id ─────────────────
+    if body.session_id:
+        session = db.get_session_by_id(body.session_id)
+        if not session:
+            return {
+                "success": False,
+                "question": body.question,
+                "answer": "Session not found."
+            }
+
+        transcript = session.get("transcript", "")
+        session_title = session.get("name", "Lecture")
+
+        if not transcript or len(transcript.strip()) < 10:
+            return {
+                "success": False,
+                "question": body.question,
+                "answer": "Session transcript is too short."
+            }
+
+        # Ensure session is RAG-indexed before answering
+        try:
+            status = await rag_pipeline.get_index_status(body.session_id)
+            if not status["indexed"]:
+                print(f"📦 RAG: Indexing session {body.session_id} synchronously (user is waiting)...")
+                await rag_pipeline.index_session(body.session_id, transcript, session_title)
+        except Exception as e:
+            print(f"⚠️  RAG indexing check failed: {e}")
+
+        # Use RAG-powered answer
+        result = await chatbot.ask_with_rag(
+            question=body.question,
+            session_id=body.session_id,
+            transcript=transcript,
+            session_title=session_title,
+            think_mode=body.think_mode
+        )
+
+        return {
+            "success": True,
+            "question": body.question,
+            "answer": result["answer"],
+            "sources": result["sources"],
+            "rag_used": result["rag_used"],
+            "think_mode": result["think_mode"],
+            "transcript_length": len(transcript)
+        }
+
+    # ─── Live mode: no session_id, use current transcript ────────
     transcript = current_session.get("transcript", "")
-    
+
     if not transcript or len(transcript.strip()) < 10:
         return {
             "success": False,
             "question": body.question,
             "answer": "Not enough transcript yet. Please wait for more transcription or start speaking."
         }
-    
-    # Get chatbot and ask question
-    chatbot = get_chatbot()
-    
-    # Run synchronous Gemini call in a separate thread to avoid blocking the event loop
+
+    # Run synchronous Groq call in a separate thread
     loop = asyncio.get_event_loop()
     answer = await loop.run_in_executor(None, chatbot.ask, body.question, transcript, body.think_mode)
-    
+
     return {
         "success": True,
         "question": body.question,
         "answer": answer,
+        "sources": [],
+        "rag_used": False,
         "think_mode": body.think_mode,
         "transcript_length": len(transcript)
     }
@@ -723,6 +802,93 @@ async def check_audio_overview(session_id: str):
     return result
 
 
+# ============================================================
+# RAG Status Endpoint
+# ============================================================
+
+@app.get("/api/rag/status/{session_id}")
+async def get_rag_status(session_id: str):
+    """Check if a session has been RAG-indexed and how many chunks it has."""
+    status = await rag_pipeline.get_index_status(session_id)
+    return status
+
+
+# ============================================================
+# Concept Graph Endpoints
+# ============================================================
+
+@app.post("/api/chat/concept-graph")
+@limiter.limit("3/minute")
+async def create_concept_graph(request: Request, body: ConceptGraphRequest):
+    """Generate or return cached concept graph for a session."""
+    session = db.get_session_by_id(body.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    transcript = session.get("transcript", "")
+    if not transcript or len(transcript.strip()) < 50:
+        return {"success": False, "message": "Transcript too short"}
+
+    # Check cache in MongoDB analysis collection
+    if not body.force_regenerate:
+        try:
+            mongo_db = db.get_database()
+            existing = mongo_db.analysis.find_one({"session_id": body.session_id})
+            if existing and existing.get("concept_graph"):
+                graph = existing["concept_graph"]
+                return {"success": True, "graph": graph, "from_cache": True}
+        except Exception as e:
+            print(f"⚠️  Cache check failed: {e}")
+
+    # Build context from uploaded files
+    context_text = ""
+    if body.context_files:
+        for cf in body.context_files:
+            context_text += f"\n--- {cf.get('name', 'file')} ---\n{cf.get('content_base64', cf.get('content', ''))}\n"
+
+    try:
+        graph = await generate_concept_graph(
+            transcript=transcript,
+            session_title=session.get("name", "Lecture"),
+            context_files_text=context_text
+        )
+
+        if graph.get("error"):
+            return {"success": False, "message": graph["error"]}
+
+        # Cache in MongoDB analysis collection (upsert)
+        try:
+            mongo_db = db.get_database()
+            mongo_db.analysis.update_one(
+                {"session_id": body.session_id},
+                {"$set": {"concept_graph": graph, "updated_at": datetime.now().isoformat()}},
+                upsert=True
+            )
+        except Exception as e:
+            print(f"⚠️  Failed to cache concept graph: {e}")
+
+        return {"success": True, "graph": graph, "from_cache": False}
+
+    except Exception as e:
+        print(f"❌ Concept graph error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "message": f"Failed to generate concept graph: {str(e)}"}
+
+
+@app.get("/api/chat/concept-graph/{session_id}")
+async def get_concept_graph(session_id: str):
+    """Return cached concept graph if it exists."""
+    try:
+        mongo_db = db.get_database()
+        existing = mongo_db.analysis.find_one({"session_id": session_id})
+        if existing and existing.get("concept_graph"):
+            return {"exists": True, "graph": existing["concept_graph"]}
+    except Exception as e:
+        print(f"⚠️  Concept graph fetch failed: {e}")
+    return {"exists": False}
+
+
 @app.get("/api/audio/{filename}")
 async def stream_audio(filename: str):
     """Stream an audio file"""
@@ -732,6 +898,169 @@ async def stream_audio(filename: str):
     
     media_type = 'audio/mpeg' if filename.endswith('.mp3') else 'audio/wav'
     return FileResponse(filepath, media_type=media_type, filename=filename)
+
+
+# ============================================================
+# Recording Enhancement Endpoints
+# ============================================================
+
+@app.post("/api/session/{session_id}/enhance-recording")
+@limiter.limit("2/minute")
+async def enhance_recording_endpoint(
+    session_id: str,
+    recording: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    request: Request = None
+):
+    """Upload a post-class recording to enhance the live transcript."""
+    # Step 1 — Validate session exists
+    session = db.get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Step 2 — Validate file type by extension
+    file_ext = os.path.splitext(recording.filename)[1].lower() if recording.filename else ''
+    supported = SUPPORTED_AUDIO | SUPPORTED_VIDEO
+    if file_ext not in supported:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {file_ext}. Supported: mp3, wav, m4a, mp4, webm, mkv, mov, avi, m4v, flac, ogg"
+        )
+
+    # Step 3 — Save uploaded file to temp directory
+    os.makedirs(RECORDING_TEMP_DIR, exist_ok=True)
+    temp_path = os.path.join(RECORDING_TEMP_DIR, f"{session_id}_{recording.filename}")
+    wav_path = None
+
+    try:
+        content = await recording.read()
+        if len(content) > 500 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="File too large. Maximum 500MB.")
+        with open(temp_path, 'wb') as f:
+            f.write(content)
+
+        # Step 4 — Get session data
+        live_transcript = session.get("transcript", "") or session.get("refined_transcript", "")
+        session_title = session.get("name", "Untitled Lecture")
+        if not live_transcript:
+            raise HTTPException(status_code=400, detail="Session has no transcript to enhance")
+
+        # Step 5 — Get domain keywords from session if stored
+        domain_keywords = session.get("domain_keywords", [])
+
+        # Step 6 — Call the enhancer
+        result = await enhance_with_recording(
+            session_id=session_id,
+            live_transcript=live_transcript,
+            recording_file_path=temp_path,
+            original_filename=recording.filename,
+            session_title=session_title,
+            domain_keywords=domain_keywords
+        )
+
+        # Step 7 — Check for errors
+        if result.get("error"):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Enhancement failed at {result['stage']}: {result['error']}"
+            )
+
+        # Step 8 — Save to MongoDB
+        mongo_db = db.get_database()
+        mongo_db.sessions.update_one(
+            {"_id": session_id},
+            {"$set": {
+                "original_transcript": live_transcript,    # preserve original
+                "transcript": result["enhanced_transcript"],  # replace with enhanced
+                "recording_enhanced": True,
+                "enhancement_stats": result["stats"],
+                "enhanced_at": datetime.utcnow().isoformat()
+            }}
+        )
+
+        # Step 9 — Mark analysis as stale
+        mongo_db.analysis.update_one(
+            {"session_id": session_id},
+            {"$set": {
+                "stale": True,
+                "stale_reason": "Transcript enhanced with recording",
+                "stale_fields": ["summary_json", "terminologies_map", "quizzes_array", "concept_graph", "flashcards"]
+            }},
+            upsert=True
+        )
+
+        # Step 10 — Trigger RAG re-indexing as background task
+        background_tasks.add_task(
+            rag_pipeline.index_session,
+            session_id=session_id,
+            transcript=result["enhanced_transcript"],
+            session_title=session_title,
+            force_reindex=True
+        )
+
+        # Step 12 — Return
+        return {
+            "success": True,
+            "enhanced_transcript": result["enhanced_transcript"],
+            "diff_tokens": result["diff_tokens"],
+            "stats": result["stats"],
+            "session_id": session_id
+        }
+
+    except HTTPException:
+        raise  # re-raise HTTP exceptions as-is
+    except Exception as e:
+        print(f"❌ Enhancement endpoint error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Enhancement failed: {str(e)}")
+    finally:
+        # Step 11 — Clean up temp files regardless of success or failure
+        for path in [temp_path, wav_path]:
+            if path and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except Exception:
+                    pass
+
+
+@app.get("/api/session/{session_id}/original-transcript")
+async def get_original_transcript(session_id: str):
+    """Returns the original pre-enhancement transcript if it exists."""
+    session = db.get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    original = session.get("original_transcript")
+    if not original:
+        raise HTTPException(
+            status_code=404,
+            detail="No original transcript found — session has not been enhanced"
+        )
+    return {
+        "original_transcript": original,
+        "recording_enhanced": session.get("recording_enhanced", False)
+    }
+
+
+@app.get("/api/session/{session_id}/enhancement-status")
+async def get_enhancement_status(session_id: str):
+    """Returns whether the session has been enhanced and its stats."""
+    session = db.get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    mongo_db = db.get_database()
+    analysis = mongo_db.analysis.find_one({"session_id": session_id})
+
+    return {
+        "recording_enhanced": session.get("recording_enhanced", False),
+        "enhanced_at": session.get("enhanced_at"),
+        "stats": session.get("enhancement_stats"),
+        "analysis_stale": analysis.get("stale", False) if analysis else False,
+        "stale_fields": analysis.get("stale_fields", []) if analysis else []
+    }
+
 
 
 # WebSocket endpoint
@@ -900,6 +1229,34 @@ async def login(request: Request, body: LoginRequest):
             "email": user['email']
         }
     }
+
+# ============================================================
+# Startup Event — pre-warm models
+# ============================================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Pre-warm RAG pipeline and check dependencies on server start."""
+    # Ensure ChromaDB persist directory exists
+    os.makedirs("./ai/chroma_db", exist_ok=True)
+    # Ensure recording temp directory exists
+    os.makedirs(RECORDING_TEMP_DIR, exist_ok=True)
+    # Pre-load embedding model so first request is fast
+    try:
+        _ = rag_pipeline.model
+        print("✅ RAG embedding model pre-loaded")
+    except Exception as e:
+        print(f"⚠️  RAG model pre-load failed (will retry on first request): {e}")
+    # Check FFmpeg availability
+    try:
+        subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5)
+        print("✅ FFmpeg is available")
+    except FileNotFoundError:
+        print("⚠️  FFmpeg is NOT installed. Recording enhancement will not work.")
+        print("   Install with: brew install ffmpeg (Mac) or apt install ffmpeg (Linux)")
+    except Exception as e:
+        print(f"⚠️  FFmpeg check failed: {e}")
+
 
 if __name__ == "__main__":
     # Ensure podcasts directory exists
