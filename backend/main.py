@@ -133,6 +133,7 @@ class ConceptGraphRequest(BaseModel):
     force_regenerate: bool = False
 
 class SaveChatHistoryRequest(BaseModel):
+    thread_id: str
     messages: List[Dict[str, Any]]
 
 class SignupRequest(BaseModel):
@@ -386,43 +387,62 @@ async def delete_session(session_id: str):
     raise HTTPException(status_code=404, detail="Session not found")
 
 # ============================================================
-# RAG Chat History Endpoints
+# RAG Chat History Endpoints (Thread-based)
 # ============================================================
 
-@app.get("/api/sessions/{session_id}/chat-history")
-async def get_chat_history(session_id: str):
-    """Get saved RAG chatbot conversation history for a session"""
+@app.get("/api/sessions/{session_id}/chat-threads")
+async def get_chat_threads(session_id: str):
+    """Get all chat threads for a session"""
     session = db.get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    messages = db.get_chat_history(session_id)
+    threads = db.get_chat_threads(session_id)
+    # Return thread metadata (without full messages for sidebar)
+    thread_list = []
+    for t in threads:
+        msgs = t.get("messages", [])
+        last_msg = msgs[-1] if msgs else None
+        thread_list.append({
+            "thread_id": t["thread_id"],
+            "title": t.get("title", "New Chat"),
+            "message_count": len(msgs),
+            "last_message": {
+                "role": last_msg.get("role", "") if last_msg else "",
+                "content": (last_msg.get("content", "")[:100]) if last_msg else ""
+            },
+            "created_at": t.get("created_at", ""),
+            "updated_at": t.get("updated_at", "")
+        })
+    return {"success": True, "threads": thread_list}
+
+@app.get("/api/sessions/{session_id}/chat-threads/{thread_id}")
+async def get_thread_messages(session_id: str, thread_id: str):
+    """Get messages for a specific chat thread"""
+    messages = db.get_thread_messages(session_id, thread_id)
     return {"success": True, "messages": messages}
 
 @app.post("/api/sessions/{session_id}/chat-history")
-async def save_chat_history(session_id: str, body: SaveChatHistoryRequest):
-    """Save/update RAG chatbot conversation history for a session"""
+async def save_chat_thread(session_id: str, body: SaveChatHistoryRequest):
+    """Save messages to a chat thread"""
     session = db.get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    success = db.save_chat_history(session_id, body.messages)
+    success = db.save_chat_thread(session_id, body.thread_id, body.messages)
     if success:
-        return {"success": True, "message": "Chat history saved", "count": len(body.messages)}
-    return {"success": False, "message": "Failed to save chat history"}
+        return {"success": True, "message": "Chat thread saved", "count": len(body.messages)}
+    return {"success": False, "message": "Failed to save chat thread"}
 
-@app.delete("/api/sessions/{session_id}/chat-history")
-async def clear_chat_history(session_id: str):
-    """Clear RAG chatbot conversation history for a session (New Chat)"""
-    session = db.get_session_by_id(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    success = db.clear_chat_history(session_id)
+@app.delete("/api/sessions/{session_id}/chat-threads/{thread_id}")
+async def delete_chat_thread(session_id: str, thread_id: str):
+    """Delete a specific chat thread"""
+    success = db.delete_chat_thread(session_id, thread_id)
     if success:
-        return {"success": True, "message": "Chat history cleared"}
-    return {"success": False, "message": "Failed to clear chat history"}
+        return {"success": True, "message": "Chat thread deleted"}
+    return {"success": False, "message": "Failed to delete chat thread"}
 
 @app.get("/api/chat-histories")
 async def get_all_chat_histories():
-    """Get all sessions that have RAG chat conversations"""
+    """Get all chat threads across all sessions"""
     histories = db.get_all_chat_histories()
     return {"success": True, "histories": histories}
 

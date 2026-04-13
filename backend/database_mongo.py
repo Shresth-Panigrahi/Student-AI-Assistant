@@ -287,101 +287,150 @@ def update_processing_status(
         return False
 
 
-def save_chat_history(session_id: str, messages: list) -> bool:
-    """Save RAG chatbot conversation history for a session"""
+def save_chat_thread(session_id: str, thread_id: str, messages: list, title: str = None) -> bool:
+    """Save messages to a specific chat thread in a session"""
+    try:
+        db = get_database()
+        session = db.sessions.find_one({"_id": session_id}, {"chat_threads": 1})
+        threads = session.get("chat_threads", []) if session else []
+
+        # Find existing thread or create new
+        found = False
+        for t in threads:
+            if t["thread_id"] == thread_id:
+                t["messages"] = messages
+                t["updated_at"] = datetime.now().isoformat()
+                if title:
+                    t["title"] = title
+                elif not t.get("title") and messages:
+                    # Auto-title from first user message
+                    for m in messages:
+                        if m.get("role") == "user":
+                            t["title"] = m["content"][:80] + ("..." if len(m["content"]) > 80 else "")
+                            break
+                found = True
+                break
+
+        if not found:
+            # Auto-title from first user message
+            auto_title = title or "New Chat"
+            if not title and messages:
+                for m in messages:
+                    if m.get("role") == "user":
+                        auto_title = m["content"][:80] + ("..." if len(m["content"]) > 80 else "")
+                        break
+            threads.append({
+                "thread_id": thread_id,
+                "title": auto_title,
+                "messages": messages,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat()
+            })
+
+        result = db.sessions.update_one(
+            {"_id": session_id},
+            {"$set": {"chat_threads": threads, "updated_at": datetime.now()}}
+        )
+        if result.matched_count > 0:
+            print(f"✅ Chat thread {thread_id} saved for session {session_id} ({len(messages)} msgs)")
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Error saving chat thread: {e}")
+        return False
+
+
+def get_chat_threads(session_id: str) -> list:
+    """Get all chat threads for a session"""
+    try:
+        db = get_database()
+        session = db.sessions.find_one({"_id": session_id}, {"chat_threads": 1})
+        if session and "chat_threads" in session:
+            return session["chat_threads"]
+        return []
+    except Exception as e:
+        print(f"❌ Error getting chat threads: {e}")
+        return []
+
+
+def get_thread_messages(session_id: str, thread_id: str) -> list:
+    """Get messages for a specific chat thread"""
+    try:
+        db = get_database()
+        session = db.sessions.find_one({"_id": session_id}, {"chat_threads": 1})
+        if session:
+            for t in session.get("chat_threads", []):
+                if t["thread_id"] == thread_id:
+                    return t.get("messages", [])
+        return []
+    except Exception as e:
+        print(f"❌ Error getting thread messages: {e}")
+        return []
+
+
+def delete_chat_thread(session_id: str, thread_id: str) -> bool:
+    """Delete a specific chat thread from a session"""
     try:
         db = get_database()
         result = db.sessions.update_one(
             {"_id": session_id},
             {
-                "$set": {
-                    "rag_chat_history": messages,
-                    "updated_at": datetime.now()
-                }
+                "$pull": {"chat_threads": {"thread_id": thread_id}},
+                "$set": {"updated_at": datetime.now()}
             }
         )
         if result.matched_count > 0:
-            print(f"✅ RAG chat history saved for session {session_id} ({len(messages)} messages)")
+            print(f"✅ Chat thread {thread_id} deleted from session {session_id}")
             return True
         return False
     except Exception as e:
-        print(f"❌ Error saving RAG chat history: {e}")
-        return False
-
-
-def get_chat_history(session_id: str) -> list:
-    """Get RAG chatbot conversation history for a session"""
-    try:
-        db = get_database()
-        session = db.sessions.find_one(
-            {"_id": session_id},
-            {"rag_chat_history": 1}
-        )
-        if session and "rag_chat_history" in session:
-            return session["rag_chat_history"]
-        return []
-    except Exception as e:
-        print(f"❌ Error getting RAG chat history: {e}")
-        return []
-
-
-def clear_chat_history(session_id: str) -> bool:
-    """Clear RAG chatbot conversation history for a session"""
-    try:
-        db = get_database()
-        result = db.sessions.update_one(
-            {"_id": session_id},
-            {
-                "$set": {
-                    "rag_chat_history": [],
-                    "updated_at": datetime.now()
-                }
-            }
-        )
-        if result.matched_count > 0:
-            print(f"✅ RAG chat history cleared for session {session_id}")
-            return True
-        return False
-    except Exception as e:
-        print(f"❌ Error clearing RAG chat history: {e}")
+        print(f"❌ Error deleting chat thread: {e}")
         return False
 
 
 def get_all_chat_histories() -> list:
-    """Get all sessions that have non-empty RAG chat history"""
+    """Get all sessions that have chat threads, with thread details"""
     try:
         db = get_database()
         sessions = list(db.sessions.find(
             {
-                "rag_chat_history": {"$exists": True, "$ne": []},
-                "$expr": {"$gt": [{"$size": "$rag_chat_history"}, 0]}
+                "chat_threads": {"$exists": True, "$ne": []},
+                "$expr": {"$gt": [{"$size": "$chat_threads"}, 0]}
             },
             {
                 "_id": 1,
                 "name": 1,
                 "timestamp": 1,
-                "rag_chat_history": 1,
+                "chat_threads": 1,
                 "updated_at": 1
             }
         ).sort("updated_at", DESCENDING))
 
         result = []
         for s in sessions:
-            messages = s.get("rag_chat_history", [])
-            last_msg = messages[-1] if messages else None
-            result.append({
-                "session_id": s["_id"],
-                "session_name": s.get("name", "Untitled"),
-                "timestamp": s.get("timestamp", ""),
-                "message_count": len(messages),
-                "last_message": {
-                    "role": last_msg.get("role", "") if last_msg else "",
-                    "content": (last_msg.get("content", "")[:100] + "...") if last_msg and len(last_msg.get("content", "")) > 100 else (last_msg.get("content", "") if last_msg else ""),
-                    "timestamp": last_msg.get("timestamp", "") if last_msg else ""
-                },
-                "updated_at": s["updated_at"].isoformat() if isinstance(s.get("updated_at"), datetime) else s.get("updated_at", "")
-            })
+            threads = s.get("chat_threads", [])
+            for t in threads:
+                messages = t.get("messages", [])
+                if not messages:
+                    continue
+                last_msg = messages[-1] if messages else None
+                result.append({
+                    "session_id": s["_id"],
+                    "session_name": s.get("name", "Untitled"),
+                    "thread_id": t["thread_id"],
+                    "thread_title": t.get("title", "New Chat"),
+                    "message_count": len(messages),
+                    "last_message": {
+                        "role": last_msg.get("role", "") if last_msg else "",
+                        "content": (last_msg.get("content", "")[:100] + "...") if last_msg and len(last_msg.get("content", "")) > 100 else (last_msg.get("content", "") if last_msg else ""),
+                        "timestamp": last_msg.get("timestamp", "") if last_msg else ""
+                    },
+                    "created_at": t.get("created_at", ""),
+                    "updated_at": t.get("updated_at", "")
+                })
 
+        # Sort by updated_at descending
+        result.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
         return result
     except Exception as e:
         print(f"❌ Error getting all chat histories: {e}")
