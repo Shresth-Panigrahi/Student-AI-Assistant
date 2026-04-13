@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import React, { useEffect, useRef, useCallback, useState, useImperativeHandle, forwardRef } from 'react'
 import * as d3 from 'd3'
 
 // ─── Types ───────────────────────────────────────────────────
@@ -8,13 +8,18 @@ export interface GraphNode {
   definition: string
   category: 'definition' | 'formula' | 'algorithm' | 'application' | 'process' | 'principle'
   importance: 1 | 2 | 3
-  // D3 adds at runtime:
+  
+  // D3 physics
   x?: number
   y?: number
   vx?: number
   vy?: number
   fx?: number | null
   fy?: number | null
+  
+  // Custom radial targets
+  radialTargetX?: number
+  radialTargetY?: number
 }
 
 export interface GraphEdge {
@@ -25,202 +30,491 @@ export interface GraphEdge {
   strength: 1 | 2 | 3
 }
 
-interface ConceptGraphProps {
+export interface ConceptGraphProps {
   nodes: GraphNode[]
   edges: GraphEdge[]
   centralConcept: string
   onNodeClick: (node: GraphNode) => void
 }
 
-// ─── Color mapping by category ──────────────────────────────
-const CATEGORY_COLORS: Record<string, string> = {
-  definition: '#7c3aed',
-  formula: '#2563eb',
-  algorithm: '#059669',
-  application: '#d97706',
-  process: '#dc2626',
-  principle: '#8b5cf6',
+export interface ConceptGraphHandle {
+  highlightNode: (nodeId: string) => void
+  resetHighlight: () => void
 }
 
-// ─── Node radius by importance ──────────────────────────────
-function nodeRadius(d: GraphNode): number {
-  switch (d.importance) {
-    case 3: return 28
-    case 2: return 22
-    case 1: return 16
-    default: return 18
+// ─── Constants & Colors ─────────────────────────────────────
+const CATEGORY_COLORS: Record<string, string> = {
+  definition: '#a855f7', // medium purple
+  formula: '#3b82f6',    // medium blue
+  algorithm: '#14b8a6',  // muted teal
+  application: '#f59e0b', // warm amber
+  process: '#ec4899',    // dusty rose
+  principle: '#8b5cf6',   // slate violet
+}
+
+const LAYER_RADIUS = {
+  3: 0,
+  2: 200,
+  1: 360
+}
+
+function nodeRadius(importance: number): number {
+  switch (importance) {
+    case 3: return 32
+    case 2: return 20
+    case 1: return 13
+    default: return 13
   }
 }
 
+// ─── Helper: Wrap Text ──────────────────────────────────────
+function calculateWrappedText(label: string): string[] {
+  if (label.length <= 12) return [label]
+  const mid = Math.ceil(label.length / 2)
+  let spaceIdx = label.indexOf(' ', mid - 4)
+  if (spaceIdx <= 0 || spaceIdx >= label.length - 2) {
+    spaceIdx = label.lastIndexOf(' ', mid + 4)
+  }
+  const splitAt = spaceIdx > 0 && spaceIdx < label.length - 2 ? spaceIdx : mid
+  return [label.slice(0, splitAt).trim(), label.slice(splitAt).trim()]
+}
+
+
 // ─── Component ──────────────────────────────────────────────
-export default function ConceptGraph({ nodes, edges, centralConcept, onNodeClick }: ConceptGraphProps) {
+const ConceptGraph = forwardRef<ConceptGraphHandle, ConceptGraphProps>(({ nodes, edges, centralConcept, onNodeClick }, ref) => {
   const svgRef = useRef<SVGSVGElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null)
+  const mainGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
+  const [zoomPercent, setZoomPercent] = useState(100)
+
+  // Imperative handle for triggering highlights from outside
+  useImperativeHandle(ref, () => ({
+    highlightNode: (nodeId: string) => activateHoverEffects(nodeId),
+    resetHighlight: () => resetHoverEffects()
+  }))
+
+  // Force simulation cleanup ref
+  const simulationRef = useRef<d3.Simulation<GraphNode, undefined> | null>(null)
+
+  // State handlers for highlighting
+  const activateHoverEffects = useCallback((focusedId: string) => {
+    if (!svgRef.current) return
+    const svg = d3.select(svgRef.current)
+    
+    // Find all connected edges
+    const connectedEdges = new Set<string>()
+    svg.selectAll('.edge-path').each((d: any) => {
+      const src = d.source.id || d.source
+      const tgt = d.target.id || d.target
+      if (src === focusedId || tgt === focusedId) {
+        connectedEdges.add(`${src}-${tgt}`)
+      }
+    })
+
+    // Fade edges
+    svg.selectAll('.edge-path')
+      .style('transition', 'stroke-opacity 0.3s ease')
+      .style('stroke-opacity', (d: any) => connectedEdges.has(`${d.source.id}-${d.target.id}`) ? 0.7 : 0.05)
+      
+    // Fade edge labels
+    svg.selectAll('.edge-label-group')
+      .style('transition', 'opacity 0.3s ease')
+      .style('opacity', (d: any) => connectedEdges.has(`${d.source.id}-${d.target.id}`) ? 1 : 0.05)
+
+    // Highlight node
+    svg.selectAll('.node-circle')
+      .style('transition', 'all 0.3s ease')
+      .attr('r', (d: any) => d.id === focusedId ? nodeRadius(d.importance) + 6 : nodeRadius(d.importance))
+      .attr('opacity', (d: any) => d.id === focusedId ? 1 : 0.5)
+
+    // Expand glow
+    svg.selectAll('.node-glow')
+      .style('transition', 'all 0.3s ease')
+      .attr('opacity', (d: any) => d.id === focusedId ? 0.4 : 0.1)
+  }, [])
+
+  const resetHoverEffects = useCallback(() => {
+    if (!svgRef.current) return
+    const svg = d3.select(svgRef.current)
+    
+    svg.selectAll('.edge-path')
+      .style('transition', 'stroke-opacity 0.3s ease')
+      .style('stroke-opacity', (d: any) => {
+        const s = d.strength || 1
+        return s === 3 ? 0.4 : s === 2 ? 0.3 : 0.15
+      })
+
+    svg.selectAll('.edge-label-group')
+      .style('transition', 'opacity 0.3s ease')
+      .style('opacity', 1)
+
+    svg.selectAll('.node-circle')
+      .style('transition', 'all 0.3s ease')
+      .attr('r', (d: any) => nodeRadius(d.importance))
+      .attr('opacity', 1)
+      
+    svg.selectAll('.node-glow')
+      .style('transition', 'all 0.3s ease')
+      .attr('opacity', 0.2)
+  }, [])
 
   const buildGraph = useCallback(() => {
-    if (!svgRef.current || nodes.length === 0) return
+    if (!svgRef.current || !wrapperRef.current) return
 
     const svg = d3.select(svgRef.current)
-    svg.selectAll('*').remove()
+    svg.selectAll('*').remove() // Clear previous
 
-    const rect = svgRef.current.getBoundingClientRect()
+    const rect = wrapperRef.current.getBoundingClientRect()
     const width = rect.width || 800
-    const height = rect.height || 600
+    const height = Math.max(rect.height || 600, 400)
 
-    // ─── Validate edges: ensure source/target exist in nodes ────
-    const nodeIds = new Set(nodes.map(n => n.id))
+    // Empty/Error States
+    if (nodes.length < 3) {
+      svg.append('text')
+        .attr('x', width / 2)
+        .attr('y', height / 2)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#9ca3af')
+        .style('font-size', '14px')
+        .text('Not enough concepts extracted. Try regenerating.')
+      return
+    }
+
     const validEdges = edges.filter(e => {
       const src = typeof e.source === 'string' ? e.source : e.source.id
       const tgt = typeof e.target === 'string' ? e.target : e.target.id
-      return nodeIds.has(src) && nodeIds.has(tgt)
+      return nodes.find(n => n.id === src) && nodes.find(n => n.id === tgt)
     })
 
-    // Deep clone to avoid D3 mutating props
+    if (validEdges.length === 0) {
+      svg.append('text')
+        .attr('x', width / 2)
+        .attr('y', height / 2 - 40)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#9ca3af')
+        .style('font-size', '14px')
+        .text('Concepts extracted but relationships unclear.')
+      
+      // Simple grid render
+      const g = svg.append('g').attr('transform', `translate(${width/2 - 200}, ${height/2})`)
+      // Minimal static visual fallback can be placed here if desired
+      return
+    }
+
+    // ─── Clone Data & Calculate Math Layout ────────────────────────
     const simNodes: GraphNode[] = nodes.map(n => ({ ...n }))
     const simEdges: GraphEdge[] = validEdges.map(e => ({ ...e }))
+    
+    const cx = width / 2
+    const cy = height / 2
 
-    // ─── Arrow marker definition ────────────────────────────────
+    // 1. Center Tier 3
+    const t3Node = simNodes.find(n => n.importance === 3) || simNodes[0]
+    t3Node.fx = cx
+    t3Node.fy = cy
+    t3Node.radialTargetX = cx
+    t3Node.radialTargetY = cy
+
+    // 2. Position Tier 2 (Equidistant circle)
+    const t2Nodes = simNodes.filter(n => n.importance === 2)
+    t2Nodes.forEach((n, idx) => {
+      const angle = (idx / t2Nodes.length) * 2 * Math.PI - Math.PI / 2
+      n.radialTargetX = cx + Math.cos(angle) * LAYER_RADIUS[2]
+      n.radialTargetY = cy + Math.sin(angle) * LAYER_RADIUS[2]
+      // Set initial positions
+      n.x = n.radialTargetX
+      n.y = n.radialTargetY
+    })
+
+    // 3. Position Tier 1 (Clustered to Tier 2's angle + slight push)
+    const t1Nodes = simNodes.filter(n => n.importance === 1)
+    
+    // Map T1 nodes to their closest T2 parent via edge
+    t1Nodes.forEach(t1 => {
+        // Find edges connected to t1
+        const connectedEdge = simEdges.find(e => 
+          (e.source === t1.id && t2Nodes.some(t2 => t2.id === e.target)) || 
+          (e.target === t1.id && t2Nodes.some(t2 => t2.id === e.source))
+        )
+        
+        let targetAngle = Math.random() * 2 * Math.PI // Fallback
+        if (connectedEdge) {
+            const parentId = connectedEdge.source === t1.id ? connectedEdge.target : connectedEdge.source
+            const parent = t2Nodes.find(n => n.id === parentId)
+            if (parent && parent.radialTargetX && parent.radialTargetY) {
+                targetAngle = Math.atan2(parent.radialTargetY - cy, parent.radialTargetX - cx)
+            }
+        }
+        
+        // Add some random dispersion to the angle to prevent exact overlap
+        const spreadAngle = targetAngle + (Math.random() - 0.5) * 0.8
+        t1.radialTargetX = cx + Math.cos(spreadAngle) * LAYER_RADIUS[1]
+        t1.radialTargetY = cy + Math.sin(spreadAngle) * LAYER_RADIUS[1]
+        t1.x = t1.radialTargetX
+        t1.y = t1.radialTargetY
+    })
+
+
+    // ─── SVG Setup & Defs ──────────────────────────────────────
     const defs = svg.append('defs')
-    defs.append('marker')
-      .attr('id', 'arrowhead')
-      .attr('viewBox', '0 -5 10 10')
-      .attr('refX', 20)
-      .attr('refY', 0)
-      .attr('markerWidth', 6)
-      .attr('markerHeight', 6)
-      .attr('orient', 'auto')
-      .append('path')
-      .attr('d', 'M0,-4L8,0L0,4')
-      .attr('fill', 'rgba(255,255,255,0.2)')
 
-    // Glow filter for central node
-    const filter = defs.append('filter')
-      .attr('id', 'glow')
-    filter.append('feGaussianBlur')
-      .attr('stdDeviation', '4')
-      .attr('result', 'coloredBlur')
-    const feMerge = filter.append('feMerge')
-    feMerge.append('feMergeNode').attr('in', 'coloredBlur')
-    feMerge.append('feMergeNode').attr('in', 'SourceGraphic')
+    // Arrowheads for different opacity strengths
+    ;([15, 30, 40]).forEach(opacity => {
+      defs.append('marker')
+        .attr('id', `arrowhead-${opacity}`)
+        .attr('viewBox', '0 -5 10 10')
+        // We will calculate exact edge boundary length per link, so refX=0
+        .attr('refX', 0) 
+        .attr('refY', 0)
+        .attr('markerWidth', 5)
+        .attr('markerHeight', 5)
+        .attr('orient', 'auto')
+        .append('path')
+        .attr('d', 'M0,-4L8,0L0,4')
+        .attr('fill', `rgba(255,255,255,${opacity/100})`)
+    })
 
-    // ─── Force simulation ───────────────────────────────────────
-    const simulation = d3.forceSimulation<GraphNode>(simNodes)
-      .force('charge', d3.forceManyBody<GraphNode>().strength(-300))
-      .force('link', d3.forceLink<GraphNode, GraphEdge>(simEdges)
-        .id(d => d.id)
-        .distance((d: any) => 120 - ((d.strength || 2) * 20))
-      )
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collide', d3.forceCollide<GraphNode>().radius(d => nodeRadius(d) + 15))
+    // Glow Filters
+    Object.entries(CATEGORY_COLORS).forEach(([cat, color]) => {
+      const filter = defs.append('filter').attr('id', `glow-${cat}`)
+      filter.append('feGaussianBlur')
+        .attr('stdDeviation', '6')
+        .attr('result', 'coloredBlur')
+      const feMerge = filter.append('feMerge')
+      feMerge.append('feMergeNode').attr('in', 'coloredBlur')
+      feMerge.append('feMergeNode').attr('in', 'SourceGraphic')
+    })
 
-    // ─── Main group (for zoom/pan) ──────────────────────────────
+
+    // ─── Main Containers & Zoom ──────────────────────────────
     const g = svg.append('g')
-
-    // ─── Zoom behavior ──────────────────────────────────────────
+    mainGroupRef.current = g
     const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.3, 3])
+      .scaleExtent([0.4, 2.5])
       .on('zoom', (event) => {
         g.attr('transform', event.transform)
+        setZoomPercent(Math.round(event.transform.k * 100))
       })
     svg.call(zoom)
     zoomRef.current = zoom
 
-    // ─── Draw edges ─────────────────────────────────────────────
+
+    // ─── Create Graphic Elements (Wait to draw till anim) ──
+    // Edges
     const edgeGroup = g.append('g').attr('class', 'edges')
-    const edgeLines = edgeGroup.selectAll('line')
+    const edgeLines = edgeGroup.selectAll('path')
       .data(simEdges)
-      .join('line')
+      .join('path')
+      .attr('class', 'edge-path')
+      .attr('fill', 'none')
       .attr('stroke', (d: any) => {
-        const s = d.strength || 2
-        return s >= 3 ? 'rgba(255,255,255,0.4)' : s >= 2 ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)'
+        const s = d.strength || 1
+        return s === 3 ? 'rgba(255,255,255,0.4)' : s === 2 ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.15)'
       })
       .attr('stroke-width', (d: any) => {
-        const s = d.strength || 2
-        return s >= 3 ? 2.5 : s >= 2 ? 1.5 : 1
+        const s = d.strength || 1
+        return s === 3 ? 2 : s === 2 ? 1.5 : 1
       })
-      .attr('marker-end', 'url(#arrowhead)')
+      .attr('marker-end', (d: any) => {
+         const s = d.strength || 1
+         const opacity = s === 3 ? 40 : s === 2 ? 30 : 15
+         return `url(#arrowhead-${opacity})`
+      })
+      .attr('opacity', 0) // Hide initially
 
-    // ─── Draw edge labels ───────────────────────────────────────
+    // Edge Labels (Tier 3-2 or 2-2 only)
     const edgeLabelGroup = g.append('g').attr('class', 'edge-labels')
-    const edgeLabels = edgeLabelGroup.selectAll('text')
-      .data(simEdges.filter((d: any) => (d.strength || 2) >= 2))
-      .join('text')
+    const edgeLabelContainers = edgeLabelGroup.selectAll('g')
+      .data(simEdges.filter(d => {
+        const srcNode = simNodes.find(n => n.id === (d.source as any).id || n.id === d.source)
+        const tgtNode = simNodes.find(n => n.id === (d.target as any).id || n.id === d.target)
+        if (!srcNode || !tgtNode) return false
+        return (srcNode.importance >= 2 && tgtNode.importance >= 2)
+      }))
+      .join('g')
+      .attr('class', 'edge-label-group')
+      .attr('opacity', 0)
+
+    edgeLabelContainers.append('rect')
+      .attr('fill', '#0f0f0f')
+      .attr('rx', 4)
+      .attr('height', 16)
+      
+    const edgeTexts = edgeLabelContainers.append('text')
       .attr('font-size', '9px')
-      .attr('fill', 'rgba(255,255,255,0.35)')
+      .attr('fill', 'rgba(255,255,255,0.6)')
       .attr('text-anchor', 'middle')
-      .attr('dy', '-4')
-      .text((d: any) => d.label || d.relationship?.replace('_', ' ') || '')
+      .attr('alignment-baseline', 'middle')
+      .text((d: any) => d.label)
 
-    // ─── Draw nodes ─────────────────────────────────────────────
+
+    // Nodes
     const nodeGroup = g.append('g').attr('class', 'nodes')
-
     const nodeContainers = nodeGroup.selectAll('g')
       .data(simNodes)
       .join('g')
+      .attr('class', 'node-container')
       .attr('cursor', 'pointer')
-      .on('click', (_event: any, d: GraphNode) => {
+      .attr('opacity', 0) // Hide initially
+      .attr('transform', d => `translate(${cx}, ${cy})`) // Start from center
+      
+      // Events
+      .on('click', (event: any, d: GraphNode) => {
         onNodeClick(d)
+        activateHoverEffects(d.id)
+        event.stopPropagation() // Prevent background click
       })
+      .on('mouseenter', (event: any, d: GraphNode) => activateHoverEffects(d.id))
+      .on('mouseleave', resetHoverEffects)
 
-    // Central concept outer ring
-    nodeContainers.filter(d => d.id === centralConcept)
-      .append('circle')
-      .attr('r', d => nodeRadius(d) + 6)
-      .attr('fill', 'none')
-      .attr('stroke', d => CATEGORY_COLORS[d.category] || '#7c3aed')
-      .attr('stroke-opacity', 0.5)
-      .attr('stroke-width', 2)
-      .attr('filter', 'url(#glow)')
-
-    // Node circles
+    // Node Glows
     nodeContainers.append('circle')
-      .attr('r', d => nodeRadius(d))
-      .attr('fill', d => CATEGORY_COLORS[d.category] || '#7c3aed')
-      .attr('stroke', 'rgba(255,255,255,0.15)')
-      .attr('stroke-width', 1.5)
-      .attr('opacity', 0.9)
-      .on('mouseover', function () {
-        d3.select(this).transition().duration(150).attr('r', (d: any) => nodeRadius(d) + 4)
-      })
-      .on('mouseout', function () {
-        d3.select(this).transition().duration(150).attr('r', (d: any) => nodeRadius(d))
-      })
+      .attr('class', 'node-glow')
+      .attr('r', d => nodeRadius(d.importance) * 1.5)
+      .attr('fill', d => CATEGORY_COLORS[d.category] || CATEGORY_COLORS['definition'])
+      .attr('opacity', 0.2)
+      .attr('filter', d => `url(#glow-${d.category})`)
 
-    // ─── Draw node labels ───────────────────────────────────────
-    const labelGroup = g.append('g').attr('class', 'labels')
+    // Node Base Circles
+    nodeContainers.append('circle')
+      .attr('class', 'node-circle')
+      .attr('r', d => nodeRadius(d.importance))
+      .attr('fill', d => CATEGORY_COLORS[d.category] || CATEGORY_COLORS['definition'])
+      .attr('stroke', '#000') // Dark inner border base
+      .attr('stroke-width', d => d.importance === 3 ? 0 : d.importance === 2 ? 2 : 1)
+
+    // Double ring for Tier 3
+    nodeContainers.filter(d => d.importance === 3)
+      .append('circle')
+      .attr('r', d => nodeRadius(3) + 4)
+      .attr('fill', 'none')
+      .attr('stroke', d => CATEGORY_COLORS[d.category] || CATEGORY_COLORS['definition'])
+      .attr('stroke-width', 2)
+
+    // Node Labels
+    const labelGroup = g.append('g').attr('class', 'node-text-labels')
     const labels = labelGroup.selectAll('text')
       .data(simNodes)
       .join('text')
+      .attr('class', 'node-text')
+      .attr('opacity', 0)
       .attr('text-anchor', 'middle')
-      .attr('font-size', '11px')
+      .attr('font-size', d => d.importance === 3 ? '15px' : d.importance === 2 ? '13px' : '11px')
+      .attr('font-weight', d => d.importance === 3 ? '700' : '500')
       .attr('fill', 'white')
-      .attr('font-weight', '500')
       .attr('pointer-events', 'none')
       .each(function (d) {
-        const text = d3.select(this)
-        const label = d.label || d.id
-        if (label.length > 12) {
-          // Split into two lines
-          const mid = Math.ceil(label.length / 2)
-          const spaceIdx = label.indexOf(' ', mid - 4)
-          const splitAt = spaceIdx > 0 && spaceIdx < label.length - 2 ? spaceIdx : mid
-          text.append('tspan')
-            .attr('x', 0)
-            .attr('dy', `${nodeRadius(d) + 14}`)
-            .text(label.slice(0, splitAt).trim())
-          text.append('tspan')
-            .attr('x', 0)
-            .attr('dy', '13')
-            .text(label.slice(splitAt).trim())
-        } else {
-          text.append('tspan')
-            .attr('x', 0)
-            .attr('dy', `${nodeRadius(d) + 14}`)
-            .text(label)
-        }
+         const selection = d3.select(this)
+         const lines = calculateWrappedText(d.label)
+         lines.forEach((line, i) => {
+            selection.append('tspan')
+              .text(line)
+              .attr('x', 0)
+              .attr('dy', i === 0 ? 0 : '1.2em')
+         })
       })
 
-    // ─── Drag behavior ──────────────────────────────────────────
+    // ─── Simulation Setup ─────────────────────────────────────
+    const simulation = d3.forceSimulation<GraphNode>(simNodes)
+      // Minimal bump to overlapping nodes
+      .force('collide', d3.forceCollide<GraphNode>().radius(d => nodeRadius(d.importance) + 10).iterations(2))
+      // Gently pull nodes via links
+      .force('link', d3.forceLink<GraphNode, GraphEdge>(simEdges).id(d => d.id).distance(50).strength(0.01))
+      // Pull nodes back to default radial positions always
+      .force('radialReturnX', d3.forceX<GraphNode>(d => d.radialTargetX || cx).strength(0.05))
+      .force('radialReturnY', d3.forceY<GraphNode>(d => d.radialTargetY || cy).strength(0.05))
+      
+    simulationRef.current = simulation
+
+
+    // ─── Path & Label computation on tick ───────────────────────
+    simulation.on('tick', () => {
+      // Bézier calculations
+      edgeLines.attr('d', (d: any) => {
+        const sourceX = d.source.x, sourceY = d.source.y
+        const targetX = d.target.x, targetY = d.target.y
+        
+        // Midpoint
+        const mx = (sourceX + targetX) / 2
+        const my = (sourceY + targetY) / 2
+        
+        // Math vector perpendicular to edge length
+        const dx = targetX - sourceX
+        const dy = targetY - sourceY
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        if (dist === 0) return ''
+
+        // Normalize and offset by 30px
+        const nx = -dy / dist
+        const ny = dx / dist
+        const offset = 30
+        const cx = mx + nx * offset
+        const cy = my + ny * offset
+        
+        // Exact target boundary (for arrowhead alignment)
+        const tgtRadius = nodeRadius((d.target as any).importance) + 2 // +2px padding
+        // Distance from control point to target
+        const dcx = targetX - cx
+        const dcy = targetY - cy
+        const ddist = Math.sqrt(dcx*dcx + dcy*dcy)
+        const tgtEdgeX = targetX - (dcx/ddist) * tgtRadius
+        const tgtEdgeY = targetY - (dcy/ddist) * tgtRadius
+
+        return `M ${sourceX} ${sourceY} Q ${cx} ${cy} ${tgtEdgeX} ${tgtEdgeY}`
+      })
+
+      // Edge labels follow the curved path midpoint
+      edgeLabelContainers.attr('transform', (d: any) => {
+        const sourceX = d.source.x, sourceY = d.source.y
+        const targetX = d.target.x, targetY = d.target.y
+        
+        // Curve equation for t=0.5
+        const mx = (sourceX + targetX) / 2
+        const my = (sourceY + targetY) / 2
+        const dx = targetX - sourceX
+        const dy = targetY - sourceY
+        const dist = Math.sqrt(dx*dx + dy*dy)
+        const offset = Math.min(30, dist/4) // adjust for very short edges
+        const nx = -dy / dist
+        const ny = dx / dist
+        const qxVal = sourceX * 0.25 + (mx + nx * offset) * 0.5 + targetX * 0.25
+        const qyVal = sourceY * 0.25 + (my + ny * offset) * 0.5 + targetY * 0.25
+        
+        // compute angle for label rotation
+        let angle = Math.atan2(targetY - sourceY, targetX - sourceX) * 180 / Math.PI
+        if (angle > 90 || angle < -90) angle += 180 // keep text upright
+        
+        return `translate(${qxVal}, ${qyVal}) rotate(${angle})`
+      })
+      
+      // Update rect backgrounds dynamically
+      edgeTexts.each(function(d: any, i) {
+         const bbox = this.getBBox()
+         d3.select(edgeLabelContainers.nodes()[i]).select('rect')
+           .attr('x', bbox.x - 4)
+           .attr('y', bbox.y - 2)
+           .attr('width', bbox.width + 8)
+      })
+
+      nodeContainers.attr('transform', (d: any) => `translate(${d.x},${d.y})`)
+      
+      // Node label preliminary positions (will refine on exact finish)
+      labels.attr('transform', (d: any) => {
+          const r = nodeRadius(d.importance)
+          return `translate(${d.x}, ${d.y + r + 15})`
+      })
+    })
+
+    // Label Placement resolution after sim settles
+    simulation.on('end', () => {
+        // Evaluate label collisions and adjust dynamically
+        // Implementation: For simplicity in the tick render, we default all labels below. 
+        // Real D3 bounding box collision resolution is computationally intensive, 
+        // so we ensure spacing primarily via forces above.
+    })
+
+    // ─── Drag Behavior ───────────────────────────────────────
     const drag = d3.drag<SVGGElement, GraphNode>()
       .on('start', (event, d) => {
         if (!event.active) simulation.alphaTarget(0.3).restart()
@@ -228,6 +522,7 @@ export default function ConceptGraph({ nodes, edges, centralConcept, onNodeClick
         d.fy = d.y
       })
       .on('drag', (event, d) => {
+        if (d.importance === 3) return // Don't drag center
         d.fx = event.x
         d.fy = event.y
       })
@@ -239,37 +534,65 @@ export default function ConceptGraph({ nodes, edges, centralConcept, onNodeClick
 
     nodeContainers.call(drag as any)
 
-    // ─── Simulation tick ────────────────────────────────────────
-    simulation.on('tick', () => {
-      edgeLines
-        .attr('x1', (d: any) => d.source.x)
-        .attr('y1', (d: any) => d.source.y)
-        .attr('x2', (d: any) => d.target.x)
-        .attr('y2', (d: any) => d.target.y)
+    // ─── Entry Animation Sequence ────────────────────────────────
+    
+    const BASE_DUR = 300
+    // Stage 1: Central Node
+    nodeContainers.filter(d => d.importance === 3)
+      .transition().duration(BASE_DUR)
+      .attr('opacity', 1)
 
-      edgeLabels
-        .attr('x', (d: any) => (d.source.x + d.target.x) / 2)
-        .attr('y', (d: any) => (d.source.y + d.target.y) / 2)
+    labels.filter((d: any) => d.importance === 3)
+      .transition().duration(BASE_DUR).attr('opacity', 1)
 
-      nodeContainers.attr('transform', (d: any) => `translate(${d.x},${d.y})`)
+    // Stage 2: Tier 2 Nodes (Fade + Scale translate)
+    nodeContainers.filter(d => d.importance === 2)
+      .transition().delay((d, i) => BASE_DUR + i * 100).duration(400)
+      .attr('opacity', 1)
+      
+    labels.filter((d: any) => d.importance === 2)
+      .transition().delay((d, i) => BASE_DUR + 200 + i * 100).duration(300).attr('opacity', 1)
 
-      labels
-        .attr('x', (d: any) => d.x)
-        .attr('y', (d: any) => d.y)
-        // Update tspan x positions for word-wrapped labels
-        .selectAll('tspan')
-        .attr('x', function () {
-          const parent = (this as SVGTSpanElement).parentNode as SVGTextElement
-          const d = d3.select(parent).datum() as GraphNode
-          return d.x || 0
-        })
-    })
+    // Stage 3: Tier 2 Edges Drawing
+    edgeLines.filter((d: any) => d.target.importance === 2 || d.source.importance === 2)
+      .transition().delay(BASE_DUR + 500).duration(400)
+      .attr('opacity', 1)
+      
+    edgeLabelContainers
+      .transition().delay(BASE_DUR + 700).duration(300)
+      .attr('opacity', 1)
 
-    // ─── Cleanup on unmount ─────────────────────────────────────
+    // Stage 4: Tier 1 Nodes
+    nodeContainers.filter(d => d.importance === 1)
+      .transition().delay((d, i) => BASE_DUR + 700 + (Math.random() * 300)).duration(400)
+      .attr('opacity', 1)
+
+    labels.filter((d: any) => d.importance === 1)
+      .transition().delay((d, i) => BASE_DUR + 800 + (Math.random() * 300)).duration(300).attr('opacity', 1)
+
+    // Stage 5: Tier 1 Edges
+    edgeLines.filter((d: any) => d.target.importance === 1 || d.source.importance === 1)
+      .transition().delay(BASE_DUR + 1100).duration(400)
+      .attr('opacity', 1)
+      
+
+    const handleBgClick = () => {
+      onNodeClick(null as any) // clear selection
+      resetHoverEffects()
+    }
+    
+    const handleBgDoubleClick = () => {
+      // Zoom Reset
+      svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity)
+    }
+
+    svg.on('click', handleBgClick)
+    svg.on('dblclick', handleBgDoubleClick)
+
     return () => {
       simulation.stop()
     }
-  }, [nodes, edges, centralConcept, onNodeClick])
+  }, [nodes, edges, centralConcept, onNodeClick, activateHoverEffects, resetHoverEffects])
 
   useEffect(() => {
     const cleanup = buildGraph()
@@ -278,33 +601,8 @@ export default function ConceptGraph({ nodes, edges, centralConcept, onNodeClick
     }
   }, [buildGraph])
 
-  // ─── Expose zoom controls ────────────────────────────────────
-  const zoomIn = useCallback(() => {
-    if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current).transition().duration(300).call(
-        zoomRef.current.scaleBy, 1.3
-      )
-    }
-  }, [])
-
-  const zoomOut = useCallback(() => {
-    if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current).transition().duration(300).call(
-        zoomRef.current.scaleBy, 0.7
-      )
-    }
-  }, [])
-
-  const resetView = useCallback(() => {
-    if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current).transition().duration(500).call(
-        zoomRef.current.transform, d3.zoomIdentity
-      )
-    }
-  }, [])
-
   return (
-    <div className="relative w-full h-full">
+    <div ref={wrapperRef} className="relative w-full h-full min-h-[400px]">
       <svg
         ref={svgRef}
         width="100%"
@@ -312,28 +610,34 @@ export default function ConceptGraph({ nodes, edges, centralConcept, onNodeClick
         style={{ background: 'transparent' }}
       />
       {/* Zoom controls overlay */}
-      <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10">
+      <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10 bg-black/20 p-1.5 rounded-xl border border-white/5 backdrop-blur-md">
+        <span className="text-[10px] text-gray-400 font-mono w-9 text-center mr-1">
+          {zoomPercent}%
+        </span>
         <button
-          onClick={zoomIn}
-          className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-gray-400 hover:bg-white/10 hover:text-white transition-all text-sm font-bold"
+          onClick={() => {
+            if (svgRef.current && zoomRef.current) {
+              d3.select(svgRef.current).transition().duration(250).call(zoomRef.current.scaleBy, 1.3)
+            }
+          }}
+          className="w-6 h-6 rounded-md border border-white/10 flex items-center justify-center text-gray-300 hover:bg-white/10 hover:text-white transition-all text-sm font-bold"
         >
           +
         </button>
         <button
-          onClick={zoomOut}
-          className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-gray-400 hover:bg-white/10 hover:text-white transition-all text-sm font-bold"
+          onClick={() => {
+            if (svgRef.current && zoomRef.current) {
+              d3.select(svgRef.current).transition().duration(250).call(zoomRef.current.scaleBy, 0.7)
+            }
+          }}
+          className="w-6 h-6 rounded-md border border-white/10 flex items-center justify-center text-gray-300 hover:bg-white/10 hover:text-white transition-all text-sm font-bold"
         >
           −
-        </button>
-        <button
-          onClick={resetView}
-          className="h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-gray-400 hover:bg-white/10 hover:text-white transition-all text-[10px] px-2"
-        >
-          Reset
         </button>
       </div>
     </div>
   )
-}
+})
 
+export default ConceptGraph
 export { CATEGORY_COLORS }

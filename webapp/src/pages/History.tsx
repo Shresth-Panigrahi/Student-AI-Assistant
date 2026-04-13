@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ArrowLeft, FileText, Calendar, MessageSquare, Trash2, Search } from 'lucide-react'
+import { ArrowLeft, FileText, Calendar, MessageSquare, Trash2, Search, Mic, Upload } from 'lucide-react'
 import { api } from '@/services/api'
 import { useStore } from '@/store/useStore'
 import { format } from 'date-fns'
@@ -47,6 +47,15 @@ export default function History() {
       alert('Failed to delete session')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleSessionClick = (session: any) => {
+    // If session is still processing, go to processing page
+    if (session.processing_status === 'processing') {
+      navigate(`/processing/${session.id}`)
+    } else {
+      navigate(`/transcript/${session.id}`)
     }
   }
 
@@ -135,70 +144,102 @@ export default function History() {
         ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
             <AnimatePresence>
-              {filteredSessions.map((session, idx) => (
-                <motion.div
-                  key={session.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ delay: idx * 0.05 }}
-                  whileHover={{ y: -5 }}
-                  onClick={() => navigate(`/transcript/${session.id}`)}
-                  className="group relative bg-[#0D0D12]/60 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden hover:border-royal-purple/50 transition-all duration-300 cursor-pointer hover:shadow-[0_0_30px_rgba(109,40,217,0.15)]"
-                >
-                  {/* Hover Gradient Overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-br from-royal-purple/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              {filteredSessions.map((session, idx) => {
+                const isProcessing = (session as any).processing_status === 'processing'
+                const isUpload = (session as any).source === 'upload'
 
-                  <div className="p-6 relative z-10">
-                    <div className="flex justify-between items-start mb-4">
-                      <div className="p-3 bg-white/5 rounded-xl group-hover:bg-royal-purple/10 transition-colors">
-                        <FileText className="w-6 h-6 text-royal-purple" />
+                return (
+                  <motion.div
+                    key={session.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ delay: idx * 0.05 }}
+                    whileHover={{ y: -5 }}
+                    onClick={() => handleSessionClick(session)}
+                    className="group relative bg-[#0D0D12]/60 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden hover:border-royal-purple/50 transition-all duration-300 cursor-pointer hover:shadow-[0_0_30px_rgba(109,40,217,0.15)]"
+                  >
+                    {/* Hover Gradient Overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-br from-royal-purple/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+                    <div className="p-6 relative z-10">
+                      <div className="flex justify-between items-start mb-4">
+                        <div className="p-3 bg-white/5 rounded-xl group-hover:bg-royal-purple/10 transition-colors">
+                          <FileText className="w-6 h-6 text-royal-purple" />
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {/* Source Badge */}
+                          {isUpload ? (
+                            <span className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 bg-white/5 rounded-lg border border-white/5">
+                              <Upload className="w-3 h-3" />
+                              Upload
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 bg-white/5 rounded-lg border border-white/5">
+                              <Mic className="w-3 h-3" />
+                              Live
+                            </span>
+                          )}
+
+                          {/* Processing badge */}
+                          {isProcessing && (
+                            <span className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-royal-purple bg-royal-purple/10 rounded-lg border border-royal-purple/20">
+                              <span className="w-2 h-2 rounded-full bg-royal-purple animate-pulse" />
+                              Processing
+                            </span>
+                          )}
+
+                          {!isProcessing && session.summary && (
+                            <span className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-400/10 rounded-lg border border-emerald-400/20">
+                              Analyzed
+                            </span>
+                          )}
+                          <button
+                            onClick={(e) => handleDeleteClick(session.id, session.name, e)}
+                            className="p-2 text-gray-500 hover:text-rose hover:bg-rose/10 rounded-lg transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        {session.summary && (
-                          <span className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-400/10 rounded-lg border border-emerald-400/20">
-                            Analyzed
-                          </span>
+                      <h3 className="text-xl font-bold text-white mb-2 line-clamp-1 group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-white group-hover:to-gray-300 transition-all">
+                        {session.name}
+                      </h3>
+
+                      <div className="flex items-center gap-4 text-sm text-secondary-gray mb-6">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5" />
+                          <span>{format(new Date(session.timestamp), 'MMM dd')}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>{session.chat?.length || 0} chats</span>
+                        </div>
+                      </div>
+
+                      <div className="relative">
+                        {isProcessing ? (
+                          <p className="text-sm text-royal-purple/60 italic">
+                            Transcript is being generated...
+                          </p>
+                        ) : (
+                          <p className="text-sm text-gray-500 line-clamp-3 leading-relaxed">
+                            {session.transcript}
+                          </p>
                         )}
-                        <button
-                          onClick={(e) => handleDeleteClick(session.id, session.name, e)}
-                          className="p-2 text-gray-500 hover:text-rose hover:bg-rose/10 rounded-lg transition-all"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="absolute bottom-0 left-0 w-full h-8 bg-gradient-to-t from-[#0D0D12] to-transparent" />
                       </div>
                     </div>
 
-                    <h3 className="text-xl font-bold text-white mb-2 line-clamp-1 group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-white group-hover:to-gray-300 transition-all">
-                      {session.name}
-                    </h3>
-
-                    <div className="flex items-center gap-4 text-sm text-secondary-gray mb-6">
-                      <div className="flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5" />
-                        <span>{format(new Date(session.timestamp), 'MMM dd')}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>{session.chat?.length || 0} chats</span>
-                      </div>
+                    <div className="px-6 py-4 border-t border-white/5 bg-white/[0.02] flex items-center justify-between text-xs font-medium text-gray-400 group-hover:text-royal-purple transition-colors">
+                      <span>{isProcessing ? 'View Progress' : 'View Details'}</span>
+                      <ArrowLeft className="w-4 h-4 rotate-180 transform group-hover:translate-x-1 transition-transform" />
                     </div>
-
-                    <div className="relative">
-                      <p className="text-sm text-gray-500 line-clamp-3 leading-relaxed">
-                        {session.transcript}
-                      </p>
-                      <div className="absolute bottom-0 left-0 w-full h-8 bg-gradient-to-t from-[#0D0D12] to-transparent" />
-                    </div>
-                  </div>
-
-                  <div className="px-6 py-4 border-t border-white/5 bg-white/[0.02] flex items-center justify-between text-xs font-medium text-gray-400 group-hover:text-royal-purple transition-colors">
-                    <span>View Details</span>
-                    <ArrowLeft className="w-4 h-4 rotate-180 transform group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </motion.div>
-              ))}
+                  </motion.div>
+                )
+              })}
             </AnimatePresence>
           </div>
         )}

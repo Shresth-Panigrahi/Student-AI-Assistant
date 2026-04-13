@@ -163,4 +163,23 @@ export const api = {
     const response = await axios.get(`${API_BASE}/session/${sessionId}/original-transcript`)
     return response.data
   },
+
+  // Upload Recording
+  uploadRecording: async (formData: FormData, onUploadProgress?: (e: any) => void) => {
+    const response = await axios.post(
+      `${API_BASE}/session/upload-recording`,
+      formData,
+      {
+        onUploadProgress,
+        timeout: 120000, // 2 min timeout for upload itself
+        headers: { 'Content-Type': 'multipart/form-data' }
+      }
+    )
+    return response.data
+  },
+
+  getProcessingStatus: async (sessionId: string) => {
+    const response = await axios.get(`${API_BASE}/session/${sessionId}/processing-status`)
+    return response.data
+  },
 }

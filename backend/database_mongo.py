@@ -222,6 +222,71 @@ def update_session_qa_analysis(session_id: str, qa_analysis: list) -> bool:
     return update_session_field(session_id, "qa_analysis", qa_analysis)
 
 
+def create_upload_session(session_id: str, name: str, topic: str = "", user_id: str = "") -> bool:
+    """Create a new session from an uploaded recording (processing state)"""
+    try:
+        db = get_database()
+
+        session_doc = {
+            "_id": session_id,
+            "name": name,
+            "timestamp": datetime.now().isoformat(),
+            "transcript": "",
+            "summary": None,
+            "chat_messages": [],
+            "terminologies": {},
+            "qa_pairs": [],
+            "source": "upload",
+            "processing_status": "processing",
+            "processing_stage": "converting",
+            "processing_error": None,
+            "topic": topic,
+            "user_id": user_id,
+            "created_at": datetime.now(),
+            "updated_at": datetime.now()
+        }
+
+        db.sessions.insert_one(session_doc)
+        print(f"✅ Upload session {session_id} created (processing)")
+        return True
+    except Exception as e:
+        print(f"❌ Error creating upload session: {e}")
+        return False
+
+
+def update_processing_status(
+    session_id: str,
+    status: str,
+    stage: str,
+    error: str = None,
+    transcript: str = None
+) -> bool:
+    """Update processing status fields on a session document"""
+    try:
+        db = get_database()
+        update_fields = {
+            "processing_status": status,
+            "processing_stage": stage,
+            "updated_at": datetime.now()
+        }
+        if error is not None:
+            update_fields["processing_error"] = error
+        if transcript is not None:
+            update_fields["transcript"] = transcript
+
+        result = db.sessions.update_one(
+            {"_id": session_id},
+            {"$set": update_fields}
+        )
+        if result.matched_count > 0:
+            print(f"✅ Processing status updated for {session_id}: {stage} ({status})")
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Error updating processing status: {e}")
+        return False
+
+
 def delete_session(session_id: str) -> bool:
     """Delete a session"""
     try:

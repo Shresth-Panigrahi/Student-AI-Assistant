@@ -24,6 +24,9 @@ from fastapi import Request
 # Import recording enhancer
 from recording_enhancer import enhance_with_recording, TEMP_DIR as RECORDING_TEMP_DIR, SUPPORTED_AUDIO, SUPPORTED_VIDEO
 
+# Import upload processor
+from upload_processor import process_uploaded_recording
+
 load_dotenv()
 try:
     _groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -1061,6 +1064,126 @@ async def get_enhancement_status(session_id: str):
         "stale_fields": analysis.get("stale_fields", []) if analysis else []
     }
 
+
+
+# ============================================================
+# Upload Recording Endpoints
+# ============================================================
+
+@app.post("/api/session/upload-recording")
+@limiter.limit("3/minute")
+async def upload_recording_endpoint(
+    request: Request,
+    recording: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    """Upload a recording file to create a brand new session from scratch.
+    Returns session_id immediately while processing continues in background.
+    """
+    from fastapi import Form
+
+    # Extract form fields from the multipart request
+    form = await request.form()
+    title = form.get("title", "Uploaded Recording")
+    topic = form.get("topic", "")
+
+    if not title or not str(title).strip():
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    title = str(title).strip()
+    topic = str(topic).strip() if topic else ""
+
+    # Validate file type
+    file_ext = os.path.splitext(recording.filename)[1].lower() if recording.filename else ''
+    supported = SUPPORTED_AUDIO | SUPPORTED_VIDEO
+    if file_ext not in supported:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {file_ext}. Supported: mp3, wav, m4a, mp4, webm, mkv, mov, avi, m4v, flac, ogg"
+        )
+
+    # Save uploaded file to temp directory
+    os.makedirs(RECORDING_TEMP_DIR, exist_ok=True)
+    session_id = f"upload_{int(datetime.now().timestamp())}"
+    temp_path = os.path.join(RECORDING_TEMP_DIR, f"{session_id}_{recording.filename}")
+
+    try:
+        content = await recording.read()
+        if len(content) > 500 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="File too large. Maximum 500MB.")
+        with open(temp_path, 'wb') as f:
+            f.write(content)
+
+        print(f"📂 Upload received: {recording.filename} ({len(content) / (1024*1024):.1f} MB)")
+
+        # Create session in MongoDB with processing state
+        success = db.create_upload_session(
+            session_id=session_id,
+            name=title,
+            topic=topic
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to create session")
+
+        # Fire background processing task
+        background_tasks.add_task(
+            process_uploaded_recording,
+            session_id=session_id,
+            file_path=temp_path,
+            original_filename=recording.filename,
+            session_title=title,
+            topic=topic
+        )
+
+        print(f"🚀 Upload processing queued for {session_id}")
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "status": "processing",
+            "message": "Recording uploaded. Processing has started."
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Upload endpoint error: {e}")
+        import traceback
+        traceback.print_exc()
+        # Clean up temp file on error
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@app.get("/api/session/{session_id}/processing-status")
+async def get_processing_status(session_id: str):
+    """Poll the processing status of an uploaded recording session."""
+    session = db.get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    status = session.get("processing_status", "complete")  # live sessions are always complete
+    stage = session.get("processing_stage", "complete")
+    error = session.get("processing_error", None)
+
+    # Build preview from transcript if complete
+    transcript_preview = None
+    if status == "complete":
+        transcript = session.get("transcript", "")
+        if transcript:
+            transcript_preview = transcript[:200] + ("..." if len(transcript) > 200 else "")
+
+    return {
+        "status": status,
+        "stage": stage,
+        "error": error,
+        "transcript_preview": transcript_preview
+    }
 
 
 # WebSocket endpoint

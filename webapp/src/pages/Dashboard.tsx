@@ -1,15 +1,17 @@
 import { useNavigate } from 'react-router-dom'
-import { CheckCircle } from 'lucide-react'
+import { CheckCircle, Upload } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useState, useEffect } from 'react'
 import MicIcon from '@/components/MicIcon'
 import QuestionIcon from '@/components/QuestionIcon'
 import NavigationLoader from '@/components/NavigationLoader'
+import UploadRecordingModal from '@/components/UploadRecordingModal'
 
 export default function Dashboard() {
   const navigate = useNavigate()
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
   const [isNavigating, setIsNavigating] = useState(false)
+  const [showUploadModal, setShowUploadModal] = useState(false)
 
   // Track mouse position
   useEffect(() => {
@@ -73,13 +75,14 @@ export default function Dashboard() {
   ]
 
   const categories = [
-    { name: 'Start Recording', icon: '🎤', useMicIcon: true },
-    { name: 'View History', icon: '📜' },
-    { name: 'Session Analysis', icon: '📊' },
-    { name: 'AI Chat Assistant', icon: '💬' },
+    { name: 'Start Recording', icon: '🎤', useMicIcon: true, action: 'session' },
+    { name: 'Upload Recording', icon: '📤', action: 'upload' },
+    { name: 'View History', icon: '📜', action: 'history' },
+    { name: 'Session Analysis', icon: '📊', action: 'session' },
+    { name: 'AI Chat Assistant', icon: '💬', action: 'session' },
   ]
 
-  return (
+  const mainContent = (
     <>
       <AnimatePresence>
         {isNavigating && <NavigationLoader />}
@@ -347,6 +350,25 @@ export default function Dashboard() {
                 }}
               >
                 History
+              </button>
+              <button
+                onClick={() => setShowUploadModal(true)}
+                style={{
+                  background: 'transparent',
+                  color: '#a855f7',
+                  border: '2px solid rgba(168, 85, 247, 0.3)',
+                  padding: '10px 24px',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <Upload size={16} />
+                Upload Recording
               </button>
               <motion.button
                 onClick={() => handleNavigation('/session')}
@@ -870,7 +892,15 @@ export default function Dashboard() {
                   whileTap={{ scale: 0.95 }}
                   transition={{ delay: idx * 0.1, duration: 0.3 }}
                   viewport={{ once: true }}
-                  onClick={() => handleNavigation('/session')}
+                onClick={() => {
+                  if (category.action === 'upload') {
+                    setShowUploadModal(true)
+                  } else if (category.action === 'history') {
+                    handleNavigation('/history')
+                  } else {
+                    handleNavigation('/session')
+                  }
+                }}
                   style={{
                     background: '#2a2a2a',
                     border: '2px solid rgba(255, 255, 255, 0.1)',
@@ -1320,6 +1350,13 @@ export default function Dashboard() {
           </section>
         </div>
       </div>
+    </>
+  )
+
+  return (
+    <>
+      {mainContent}
+      <UploadRecordingModal isOpen={showUploadModal} onClose={() => setShowUploadModal(false)} />
     </>
   )
 }

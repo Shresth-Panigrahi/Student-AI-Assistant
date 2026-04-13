@@ -8,6 +8,7 @@ import History from './pages/History'
 import TranscriptDetail from './pages/TranscriptDetail'
 import ChatSession from './pages/ChatSession'
 import LandingPage from './pages/LandingPage'
+import ProcessingSession from './pages/ProcessingSession'
 // import { useState } from 'react'
 
 function AppContent() {
@@ -33,6 +34,7 @@ function AppContent() {
           <Route path="/history" element={isAuth ? <History /> : <Navigate to="/auth" replace />} />
           <Route path="/transcript/:id" element={isAuth ? <TranscriptDetail /> : <Navigate to="/auth" replace />} />
           <Route path="/chat/:sessionId" element={isAuth ? <ChatSession /> : <Navigate to="/auth" replace />} />
+          <Route path="/processing/:sessionId" element={isAuth ? <ProcessingSession /> : <Navigate to="/auth" replace />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

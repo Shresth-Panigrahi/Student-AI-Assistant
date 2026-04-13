@@ -10,7 +10,7 @@ import { api } from '@/services/api'
 import { format } from 'date-fns'
 import axios from 'axios'
 import ConceptGraph, { CATEGORY_COLORS } from '@/components/ConceptGraph'
-import type { GraphNode, GraphEdge } from '@/components/ConceptGraph'
+import type { GraphNode, GraphEdge, ConceptGraphHandle } from '@/components/ConceptGraph'
 
 // ─── Types ───────────────────────────────────────────────────
 interface SessionData {
@@ -133,6 +133,10 @@ export default function ChatSession() {
     'definition', 'formula', 'algorithm', 'application', 'process', 'principle'
   ])
   const [graphFromCache, setGraphFromCache] = useState(false)
+  
+  // Graph Panel State
+  const graphRef = useRef<ConceptGraphHandle>(null)
+  const [graphPanelOpen, setGraphPanelOpen] = useState(true)
 
   // RAG Status
   const [ragStatus, setRagStatus] = useState<{ indexed: boolean; chunk_count: number } | null>(null)
@@ -509,6 +513,32 @@ export default function ChatSession() {
     })
   }
 
+  const getConnectedNodes = (nodeId: string) => {
+    if (!graphData) return []
+    const edges = getConnectedEdges(nodeId)
+    const connectedIds = edges.map(e => {
+      const src = typeof e.source === 'string' ? e.source : (e.source as any).id
+      const tgt = typeof e.target === 'string' ? e.target : (e.target as any).id
+      return src === nodeId ? tgt : src
+    })
+    return graphData.nodes.filter(n => connectedIds.includes(n.id))
+  }
+
+  const handleExportSVG = () => {
+    const svgElement = document.querySelector('.nodes')?.closest('svg')
+    if (!svgElement) return
+    const svgData = new XMLSerializer().serializeToString(svgElement)
+    const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `concept-graph-${session?.name.replace(/\\s+/g, '-').toLowerCase() || 'export'}.svg`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   const getNodeLabel = (nodeId: string) => {
     if (!graphData) return nodeId
     const node = graphData.nodes.find(n => n.id === nodeId)
@@ -542,7 +572,7 @@ export default function ChatSession() {
     badge?: { text: string; style: string }
     disabled?: boolean
   }[] = [
-    {
+{
       id: 'audio',
       icon: <Headphones className="w-5 h-5 text-[#7c3aed]" />,
       title: 'Audio Overview',

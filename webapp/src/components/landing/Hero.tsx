@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, useScroll, useTransform, AnimatePresence } from 'framer-motion';
-import { Mic, Play, ArrowDown, Mouse } from 'lucide-react';
+import { Mic, Play, ArrowDown, Mouse, Upload } from 'lucide-react';
 import gsap from 'gsap';
+import UploadRecordingModal from '../UploadRecordingModal';
 
 const Hero = () => {
     const containerRef = useRef<HTMLDivElement>(null);
     const textRef = useRef<HTMLHeadingElement>(null);
     const [typingPhase, setTypingPhase] = useState(0); // 0-3: phases, 4: final
+    const [showUploadModal, setShowUploadModal] = useState(false);
 
     const { scrollY } = useScroll();
     const y1 = useTransform(scrollY, [0, 500], [0, 100]);
@@ -72,7 +74,7 @@ const Hero = () => {
         </motion.span>
     );
 
-    return (
+    const content = (
         <div ref={containerRef} className="relative min-h-screen w-full bg-true-black overflow-hidden flex flex-col items-center justify-center pt-20">
 
             {/* Background Orbs */}
@@ -167,6 +169,19 @@ const Hero = () => {
                             <div className="text-xs text-secondary-gray">See in action</div>
                         </div>
                     </button>
+
+                    <button
+                        onClick={() => setShowUploadModal(true)}
+                        className="group relative w-full md:w-auto flex items-center gap-4 px-8 py-4 rounded-3xl border border-royal-purple/20 hover:bg-royal-purple/10 transition-all duration-300"
+                    >
+                        <div className="p-3 bg-white/10 rounded-xl group-hover:scale-110 transition-transform">
+                            <Upload className="text-royal-purple w-6 h-6" />
+                        </div>
+                        <div className="text-left">
+                            <div className="text-white font-bold text-lg">Upload a Recording</div>
+                            <div className="text-xs text-secondary-gray">Already have a lecture file?</div>
+                        </div>
+                    </button>
                 </motion.div>
 
                 {/* Trust Badges */}
@@ -203,6 +218,13 @@ const Hero = () => {
             </motion.div>
 
         </div>
+    );
+
+    return (
+        <>
+            {content}
+            <UploadRecordingModal isOpen={showUploadModal} onClose={() => setShowUploadModal(false)} />
+        </>
     );
 };
 

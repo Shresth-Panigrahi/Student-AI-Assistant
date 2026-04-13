@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, Upload } from 'lucide-react';
 
 import { motion } from 'framer-motion';
+import UploadRecordingModal from '../UploadRecordingModal';
 
 const Navbar = () => {
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const [showUploadModal, setShowUploadModal] = useState(false);
 
     useEffect(() => {
         const handleScroll = () => {
@@ -16,6 +18,7 @@ const Navbar = () => {
     }, []);
 
     return (
+        <>
         <nav
             className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${isScrolled
                 ? 'bg-[#0D0D12]/80 backdrop-blur-2xl border-b border-[#6D28D9]/10'
@@ -52,8 +55,18 @@ const Navbar = () => {
                     ))}
                 </div>
 
-                {/* CTA Button */}
-                <div className="hidden md:block">
+                {/* CTA Buttons */}
+                <div className="hidden md:flex items-center gap-3">
+                    {/* Upload Recording Button */}
+                    <button
+                        onClick={() => setShowUploadModal(true)}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-royal-purple/30 text-royal-purple text-sm font-semibold backdrop-blur-sm hover:bg-royal-purple/10 hover:border-royal-purple/50 transition-all duration-300"
+                    >
+                        <Upload className="w-4 h-4" />
+                        Upload Recording
+                    </button>
+
+                    {/* Start Recording Button */}
                     <motion.button
                         onClick={() => window.location.href = '/session'}
                         initial="initial"
@@ -66,35 +79,35 @@ const Navbar = () => {
                             },
                             hover: {
                                 borderColor: [
-                                    "rgba(109, 40, 217, 0.3)", // Start
-                                    "rgba(168, 85, 247, 0)",   // Off
-                                    "#a855f7",                 // On (Purple)
-                                    "rgba(168, 85, 247, 0)",   // Off
-                                    "#a855f7",                 // On (Purple)
-                                    "rgba(168, 85, 247, 0)",   // Off
-                                    "#a855f7"                  // Final (Stable)
+                                    "rgba(109, 40, 217, 0.3)",
+                                    "rgba(168, 85, 247, 0)",
+                                    "#a855f7",
+                                    "rgba(168, 85, 247, 0)",
+                                    "#a855f7",
+                                    "rgba(168, 85, 247, 0)",
+                                    "#a855f7"
                                 ],
                                 color: [
-                                    "#ffffff",                 // Start
-                                    "rgba(255, 255, 255, 0.1)",// Off
-                                    "#a855f7",                 // On (Purple)
-                                    "rgba(255, 255, 255, 0.1)",// Off
-                                    "#a855f7",                 // On (Purple)
-                                    "rgba(255, 255, 255, 0.1)",// Off
-                                    "#a855f7"                  // Final (Stable)
+                                    "#ffffff",
+                                    "rgba(255, 255, 255, 0.1)",
+                                    "#a855f7",
+                                    "rgba(255, 255, 255, 0.1)",
+                                    "#a855f7",
+                                    "rgba(255, 255, 255, 0.1)",
+                                    "#a855f7"
                                 ],
                                 boxShadow: [
                                     "0 0 0px rgba(168, 85, 247, 0)",
                                     "0 0 0px rgba(168, 85, 247, 0)",
-                                    "0 0 10px rgba(168, 85, 247, 0.4)", // Mild glow on flash
+                                    "0 0 10px rgba(168, 85, 247, 0.4)",
                                     "0 0 0px rgba(168, 85, 247, 0)",
-                                    "0 0 10px rgba(168, 85, 247, 0.4)", // Mild glow on flash
+                                    "0 0 10px rgba(168, 85, 247, 0.4)",
                                     "0 0 0px rgba(168, 85, 247, 0)",
-                                    "0 0 25px rgba(168, 85, 247, 0.6)"  // Final strong glow
+                                    "0 0 25px rgba(168, 85, 247, 0.6)"
                                 ],
                                 transition: {
                                     duration: 0.8,
-                                    times: [0, 0.1, 0.3, 0.4, 0.6, 0.8, 1], // Rapid 'bulb' flickering
+                                    times: [0, 0.1, 0.3, 0.4, 0.6, 0.8, 1],
                                     ease: "linear"
                                 }
                             }
@@ -133,14 +146,25 @@ const Navbar = () => {
                         </a>
                     ))}
                     <button
+                        onClick={() => { setShowUploadModal(true); setIsMobileMenuOpen(false); }}
+                        className="w-full mt-2 h-12 rounded-xl border border-royal-purple/30 text-royal-purple font-bold flex items-center justify-center gap-2"
+                    >
+                        <Upload className="w-4 h-4" />
+                        Upload Recording
+                    </button>
+                    <button
                         onClick={() => window.location.href = '/session'}
-                        className="w-full mt-4 h-12 rounded-xl bg-gradient-to-r from-royal-purple to-deep-magenta text-white font-bold shadow-lg"
+                        className="w-full h-12 rounded-xl bg-gradient-to-r from-royal-purple to-deep-magenta text-white font-bold shadow-lg"
                     >
                         Start Recording
                     </button>
                 </div>
             )}
         </nav>
+
+        {/* Upload Modal */}
+        <UploadRecordingModal isOpen={showUploadModal} onClose={() => setShowUploadModal(false)} />
+        </>
     );
 };
 
