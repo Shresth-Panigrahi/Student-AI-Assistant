@@ -88,6 +88,10 @@ const ConceptGraph = forwardRef<ConceptGraphHandle, ConceptGraphProps>(({ nodes,
   const mainGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
   const [zoomPercent, setZoomPercent] = useState(100)
 
+  // Refs to store callbacks without triggering rebuilds
+  const onNodeClickRef = useRef(onNodeClick)
+  onNodeClickRef.current = onNodeClick
+
   // Imperative handle for triggering highlights from outside
   useImperativeHandle(ref, () => ({
     highlightNode: (nodeId: string) => activateHoverEffects(nodeId),
@@ -592,7 +596,7 @@ const ConceptGraph = forwardRef<ConceptGraphHandle, ConceptGraphProps>(({ nodes,
     return () => {
       simulation.stop()
     }
-  }, [nodes, edges, centralConcept, onNodeClick, activateHoverEffects, resetHoverEffects])
+  }, [nodes, edges, centralConcept, activateHoverEffects, resetHoverEffects])
 
   useEffect(() => {
     const cleanup = buildGraph()

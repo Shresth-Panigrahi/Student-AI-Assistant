@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -149,6 +149,11 @@ export default function ChatSession() {
   // Graph Panel State
   const graphRef = useRef<ConceptGraphHandle>(null)
   const [graphPanelOpen, setGraphPanelOpen] = useState(true)
+
+  // Graph node click handler - memoized to prevent graph rebuilds
+  const handleGraphNodeClick = useCallback((node: GraphNode | null) => {
+    setSelectedNode(node)
+  }, [])
 
   // RAG Status
   const [ragStatus, setRagStatus] = useState<{ indexed: boolean; chunk_count: number } | null>(null)
@@ -552,17 +557,20 @@ export default function ChatSession() {
   }, [currentCardIndex, flashcards.length, cardResults])
 
   // ─── Graph filtering ──────────────────────────────────────
-  const filteredGraphNodes = graphData
-    ? graphData.nodes.filter(n => categoryFilter.includes(n.category))
-    : []
-  const filteredNodeIds = new Set(filteredGraphNodes.map(n => n.id))
-  const filteredGraphEdges = graphData
-    ? graphData.edges.filter(e => {
+  const filteredGraphNodes = useMemo(() => {
+    if (!graphData) return []
+    return graphData.nodes.filter(n => categoryFilter.includes(n.category))
+  }, [graphData, categoryFilter])
+
+  const filteredGraphEdges = useMemo(() => {
+    if (!graphData || filteredGraphNodes.length === 0) return []
+    const filteredNodeIds = new Set(filteredGraphNodes.map(n => n.id))
+    return graphData.edges.filter(e => {
       const src = typeof e.source === 'string' ? e.source : (e.source as any).id
       const tgt = typeof e.target === 'string' ? e.target : (e.target as any).id
       return filteredNodeIds.has(src) && filteredNodeIds.has(tgt)
     })
-    : []
+  }, [graphData, filteredGraphNodes])
 
   // ─── Helpers ───────────────────────────────────────────────
   const wordCount = session?.transcript?.split(' ').length || 0
@@ -1512,7 +1520,7 @@ export default function ChatSession() {
                       nodes={filteredGraphNodes}
                       edges={filteredGraphEdges}
                       centralConcept={graphData.central_concept}
-                      onNodeClick={(node) => setSelectedNode(node)}
+                      onNodeClick={handleGraphNodeClick}
                     />
                   </div>
 
