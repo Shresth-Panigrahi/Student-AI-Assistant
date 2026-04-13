@@ -175,10 +175,13 @@ class RAGPipeline:
             return {"indexed": False, "chunk_count": 0, "session_id": session_id,
                     "error": f"Embedding failed: {str(e)}"}
 
-        # Step 5 — Store in ChromaDB
+        # Step 5 — Store in ChromaDB (cosine distance for normalized embeddings)
         try:
             collection = await asyncio.to_thread(
-                lambda: self.chroma_client.get_or_create_collection(f"session_{session_id}")
+                lambda: self.chroma_client.get_or_create_collection(
+                    name=f"session_{session_id}",
+                    metadata={"hnsw:space": "cosine"}
+                )
             )
 
             ids = [f"{session_id}_chunk_{i}" for i in range(len(chunks))]
@@ -236,9 +239,11 @@ class RAGPipeline:
                 lambda: self.chroma_client.get_collection(f"session_{session_id}")
             )
             count = await asyncio.to_thread(lambda: collection.count())
+            print(f"🔍 RAG retrieve: Collection session_{session_id} has {count} chunks")
             if count == 0:
                 return []
-        except Exception:
+        except Exception as e:
+            print(f"⚠️  RAG retrieve: Collection not found for session_{session_id}: {e}")
             return []  # Collection doesn't exist
 
         # Query
@@ -255,15 +260,20 @@ class RAGPipeline:
             return []
 
         # Parse results
+        # ChromaDB cosine distance is in [0, 2]. Convert to similarity: 1 - (distance / 2) → [0, 1]
         retrieved = []
         if results and results.get("ids") and results["ids"][0]:
             for i in range(len(results["ids"][0])):
-                distance = results["distances"][0][i] if results.get("distances") else 1.0
-                relevance_score = 1 - distance
+                distance = results["distances"][0][i] if results.get("distances") else 2.0
+                # Cosine distance → cosine similarity: similarity = 1 - (distance / 2)
+                relevance_score = max(0.0, 1.0 - (distance / 2.0))
                 metadata = results["metadatas"][0][i] if results.get("metadatas") else {}
 
-                # Filter out low-relevance chunks
+                print(f"  📊 Chunk {i}: distance={distance:.4f}, relevance={relevance_score:.4f}")
+
+                # Filter out low-relevance chunks (0.25 on a 0-1 scale)
                 if relevance_score < 0.25:
+                    print(f"  ⏭️  Skipping chunk {i}: relevance {relevance_score:.4f} < 0.25")
                     continue
 
                 retrieved.append({
@@ -271,6 +281,8 @@ class RAGPipeline:
                     "relevance_score": relevance_score,
                     "chunk_index": metadata.get("chunk_index", i)
                 })
+
+        print(f"🔍 RAG retrieve: {len(retrieved)} chunks passed relevance filter")
 
         # Sort by relevance descending
         retrieved.sort(key=lambda x: x["relevance_score"], reverse=True)

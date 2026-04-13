@@ -345,12 +345,17 @@ async def save_session(request: Request, body: SaveSessionRequest, background_ta
 
     if success:
         # Trigger RAG indexing as a background task (non-blocking)
-        background_tasks.add_task(
-            rag_pipeline.index_session,
-            session_id=session_id,
-            transcript=refined_transcript,
-            session_title=session_name
-        )
+        async def _background_rag_index():
+            try:
+                await rag_pipeline.index_session(
+                    session_id=session_id,
+                    transcript=refined_transcript,
+                    session_title=session_name
+                )
+            except Exception as e:
+                print(f"❌ Background RAG indexing failed for {session_id}: {e}")
+
+        background_tasks.add_task(_background_rag_index)
         print(f"📦 RAG indexing queued as background task for {session_id}")
 
         return {
@@ -484,6 +489,7 @@ async def ask_question(request: Request, body: QuestionRequest):
             }
 
         # Ensure session is RAG-indexed before answering
+        # Always force reindex to ensure cosine distance metric is used
         try:
             status = await rag_pipeline.get_index_status(body.session_id)
             if not status["indexed"]:
@@ -491,6 +497,8 @@ async def ask_question(request: Request, body: QuestionRequest):
                 await rag_pipeline.index_session(body.session_id, transcript, session_title)
         except Exception as e:
             print(f"⚠️  RAG indexing check failed: {e}")
+            import traceback
+            traceback.print_exc()
 
         # Use RAG-powered answer
         result = await chatbot.ask_with_rag(
@@ -1057,13 +1065,18 @@ async def enhance_recording_endpoint(
         )
 
         # Step 10 — Trigger RAG re-indexing as background task
-        background_tasks.add_task(
-            rag_pipeline.index_session,
-            session_id=session_id,
-            transcript=result["enhanced_transcript"],
-            session_title=session_title,
-            force_reindex=True
-        )
+        async def _background_rag_reindex():
+            try:
+                await rag_pipeline.index_session(
+                    session_id=session_id,
+                    transcript=result["enhanced_transcript"],
+                    session_title=session_title,
+                    force_reindex=True
+                )
+            except Exception as e:
+                print(f"❌ Background RAG re-indexing failed for {session_id}: {e}")
+
+        background_tasks.add_task(_background_rag_reindex)
 
         # Step 12 — Return
         return {
