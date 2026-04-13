@@ -287,6 +287,107 @@ def update_processing_status(
         return False
 
 
+def save_chat_history(session_id: str, messages: list) -> bool:
+    """Save RAG chatbot conversation history for a session"""
+    try:
+        db = get_database()
+        result = db.sessions.update_one(
+            {"_id": session_id},
+            {
+                "$set": {
+                    "rag_chat_history": messages,
+                    "updated_at": datetime.now()
+                }
+            }
+        )
+        if result.matched_count > 0:
+            print(f"✅ RAG chat history saved for session {session_id} ({len(messages)} messages)")
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Error saving RAG chat history: {e}")
+        return False
+
+
+def get_chat_history(session_id: str) -> list:
+    """Get RAG chatbot conversation history for a session"""
+    try:
+        db = get_database()
+        session = db.sessions.find_one(
+            {"_id": session_id},
+            {"rag_chat_history": 1}
+        )
+        if session and "rag_chat_history" in session:
+            return session["rag_chat_history"]
+        return []
+    except Exception as e:
+        print(f"❌ Error getting RAG chat history: {e}")
+        return []
+
+
+def clear_chat_history(session_id: str) -> bool:
+    """Clear RAG chatbot conversation history for a session"""
+    try:
+        db = get_database()
+        result = db.sessions.update_one(
+            {"_id": session_id},
+            {
+                "$set": {
+                    "rag_chat_history": [],
+                    "updated_at": datetime.now()
+                }
+            }
+        )
+        if result.matched_count > 0:
+            print(f"✅ RAG chat history cleared for session {session_id}")
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Error clearing RAG chat history: {e}")
+        return False
+
+
+def get_all_chat_histories() -> list:
+    """Get all sessions that have non-empty RAG chat history"""
+    try:
+        db = get_database()
+        sessions = list(db.sessions.find(
+            {
+                "rag_chat_history": {"$exists": True, "$ne": []},
+                "$expr": {"$gt": [{"$size": "$rag_chat_history"}, 0]}
+            },
+            {
+                "_id": 1,
+                "name": 1,
+                "timestamp": 1,
+                "rag_chat_history": 1,
+                "updated_at": 1
+            }
+        ).sort("updated_at", DESCENDING))
+
+        result = []
+        for s in sessions:
+            messages = s.get("rag_chat_history", [])
+            last_msg = messages[-1] if messages else None
+            result.append({
+                "session_id": s["_id"],
+                "session_name": s.get("name", "Untitled"),
+                "timestamp": s.get("timestamp", ""),
+                "message_count": len(messages),
+                "last_message": {
+                    "role": last_msg.get("role", "") if last_msg else "",
+                    "content": (last_msg.get("content", "")[:100] + "...") if last_msg and len(last_msg.get("content", "")) > 100 else (last_msg.get("content", "") if last_msg else ""),
+                    "timestamp": last_msg.get("timestamp", "") if last_msg else ""
+                },
+                "updated_at": s["updated_at"].isoformat() if isinstance(s.get("updated_at"), datetime) else s.get("updated_at", "")
+            })
+
+        return result
+    except Exception as e:
+        print(f"❌ Error getting all chat histories: {e}")
+        return []
+
+
 def delete_session(session_id: str) -> bool:
     """Delete a session"""
     try:

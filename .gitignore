@@ -113,3 +113,6 @@ transcribev6.py
 transcribev7.py
 transcribev8.py
 whisp.py
+
+.claude/
+backend/ai/chroma_db/

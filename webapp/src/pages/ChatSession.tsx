@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, Sparkles, ChevronRight, ChevronDown, ChevronUp, ChevronLeft,
   Headphones, FileText, Layers, HelpCircle, GitFork, Lock, Plus, X,
-  RefreshCw, Download, Play, Pause, Trophy, Share2, Database, Send
+  RefreshCw, Download, Play, Pause, Trophy, Share2, Database, Send, MessageSquarePlus
 } from 'lucide-react'
 import { api } from '@/services/api'
 import { format } from 'date-fns'
@@ -147,6 +147,7 @@ export default function ChatSession() {
   const [chatLoading, setChatLoading] = useState(false)
   const [chatThinkMode, setChatThinkMode] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
+  const [chatHistoryLoaded, setChatHistoryLoaded] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // ─── Load Session ────────────────────────────────────────────
@@ -255,6 +256,34 @@ export default function ChatSession() {
     if (activeFeature === 'audio' && !audioUrl && !generating && !audioLoading) checkAudio()
     if (activeFeature === 'graph' && !graphData && !graphLoading) fetchGraph()
   }, [activeFeature])
+
+  // ─── Load saved chat history when chat is activated ────────
+  useEffect(() => {
+    if (activeFeature !== 'chat' || !sessionId || chatHistoryLoaded) return
+    const loadHistory = async () => {
+      try {
+        setChatLoading(true)
+        const res = await api.getChatHistory(sessionId)
+        if (res.success && res.messages && res.messages.length > 0) {
+          const restored: ChatMessage[] = res.messages.map((m: any) => ({
+            role: m.role,
+            content: m.content,
+            sources: m.sources || [],
+            rag_used: m.rag_used || false,
+            think_mode: m.think_mode || false,
+            timestamp: m.timestamp ? new Date(m.timestamp) : new Date()
+          }))
+          setChatMessages(restored)
+        }
+      } catch (e) {
+        console.error('Failed to load chat history:', e)
+      } finally {
+        setChatHistoryLoaded(true)
+        setChatLoading(false)
+      }
+    }
+    loadHistory()
+  }, [activeFeature, sessionId, chatHistoryLoaded])
 
   // ─── Auto-scroll chat ──────────────────────────────────────
   useEffect(() => {
@@ -416,7 +445,19 @@ export default function ChatSession() {
         think_mode: res.think_mode || false,
         timestamp: new Date()
       }
-      setChatMessages(prev => [...prev, assistantMsg])
+      setChatMessages(prev => {
+        const updated = [...prev, assistantMsg]
+        // Auto-save chat history (fire-and-forget)
+        api.saveChatHistory(sessionId!, updated.map(m => ({
+          role: m.role,
+          content: m.content,
+          sources: m.sources,
+          rag_used: m.rag_used,
+          think_mode: m.think_mode,
+          timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp
+        }))).catch(e => console.error('Failed to save chat history:', e))
+        return updated
+      })
     } catch (e: any) {
       const errorMsg: ChatMessage = {
         role: 'assistant',
@@ -1553,7 +1594,28 @@ export default function ChatSession() {
                     </span>
                   )}
                 </div>
-                {/* Think mode toggle */}
+                <div className="flex items-center gap-3">
+                  {/* New Chat button */}
+                  {chatMessages.length > 0 && (
+                    <button
+                      onClick={async () => {
+                        if (!sessionId) return
+                        setChatMessages([])
+                        setChatHistoryLoaded(true)
+                        try {
+                          await api.clearChatHistory(sessionId)
+                        } catch (e) {
+                          console.error('Failed to clear chat history:', e)
+                        }
+                      }}
+                      className="flex items-center gap-1.5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:border-purple-500/40 hover:bg-purple-500/10 transition-all duration-200"
+                      title="Start a new conversation"
+                    >
+                      <MessageSquarePlus className="w-3.5 h-3.5" />
+                      New Chat
+                    </button>
+                  )}
+                  {/* Think mode toggle */}
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1565,6 +1627,7 @@ export default function ChatSession() {
                     {chatThinkMode ? '🧠 Think Mode' : '📄 Transcript Only'}
                   </span>
                 </label>
+                </div>
               </div>
 
               {/* Messages */}

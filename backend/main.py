@@ -132,6 +132,9 @@ class ConceptGraphRequest(BaseModel):
     context_files: List[Dict[str, Any]] = []
     force_regenerate: bool = False
 
+class SaveChatHistoryRequest(BaseModel):
+    messages: List[Dict[str, Any]]
+
 class SignupRequest(BaseModel):
     name: str
     username: str
@@ -381,6 +384,47 @@ async def delete_session(session_id: str):
         await rag_pipeline.delete_session_index(session_id)
         return {"success": True, "message": "Session deleted successfully"}
     raise HTTPException(status_code=404, detail="Session not found")
+
+# ============================================================
+# RAG Chat History Endpoints
+# ============================================================
+
+@app.get("/api/sessions/{session_id}/chat-history")
+async def get_chat_history(session_id: str):
+    """Get saved RAG chatbot conversation history for a session"""
+    session = db.get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    messages = db.get_chat_history(session_id)
+    return {"success": True, "messages": messages}
+
+@app.post("/api/sessions/{session_id}/chat-history")
+async def save_chat_history(session_id: str, body: SaveChatHistoryRequest):
+    """Save/update RAG chatbot conversation history for a session"""
+    session = db.get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    success = db.save_chat_history(session_id, body.messages)
+    if success:
+        return {"success": True, "message": "Chat history saved", "count": len(body.messages)}
+    return {"success": False, "message": "Failed to save chat history"}
+
+@app.delete("/api/sessions/{session_id}/chat-history")
+async def clear_chat_history(session_id: str):
+    """Clear RAG chatbot conversation history for a session (New Chat)"""
+    session = db.get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    success = db.clear_chat_history(session_id)
+    if success:
+        return {"success": True, "message": "Chat history cleared"}
+    return {"success": False, "message": "Failed to clear chat history"}
+
+@app.get("/api/chat-histories")
+async def get_all_chat_histories():
+    """Get all sessions that have RAG chat conversations"""
+    histories = db.get_all_chat_histories()
+    return {"success": True, "histories": histories}
 
 @app.post("/api/qa/ask")
 @limiter.limit("20/minute")

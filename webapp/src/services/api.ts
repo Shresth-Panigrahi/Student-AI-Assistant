@@ -141,6 +141,27 @@ export const api = {
     return response.data
   },
 
+  // RAG Chat History Persistence
+  getChatHistory: async (sessionId: string) => {
+    const response = await axios.get(`${API_BASE}/sessions/${sessionId}/chat-history`)
+    return response.data
+  },
+
+  saveChatHistory: async (sessionId: string, messages: any[]) => {
+    const response = await axios.post(`${API_BASE}/sessions/${sessionId}/chat-history`, { messages })
+    return response.data
+  },
+
+  clearChatHistory: async (sessionId: string) => {
+    const response = await axios.delete(`${API_BASE}/sessions/${sessionId}/chat-history`)
+    return response.data
+  },
+
+  getAllChatHistories: async () => {
+    const response = await axios.get(`${API_BASE}/chat-histories`)
+    return response.data
+  },
+
   // Recording Enhancement
   enhanceWithRecording: async (sessionId: string, formData: FormData, onUploadProgress?: (e: any) => void) => {
     const response = await axios.post(
