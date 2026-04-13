@@ -141,19 +141,19 @@ export const api = {
     return response.data
   },
 
-  // RAG Chat History Persistence
-  getChatHistory: async (sessionId: string) => {
-    const response = await axios.get(`${API_BASE}/sessions/${sessionId}/chat-history`)
+  // RAG Chat History Persistence (Thread-based)
+  getChatHistory: async (sessionId: string, threadId: string) => {
+    const response = await axios.get(`${API_BASE}/sessions/${sessionId}/chat-threads/${threadId}`)
     return response.data
   },
 
-  saveChatHistory: async (sessionId: string, messages: any[]) => {
-    const response = await axios.post(`${API_BASE}/sessions/${sessionId}/chat-history`, { messages })
+  saveChatHistory: async (sessionId: string, threadId: string, messages: any[]) => {
+    const response = await axios.post(`${API_BASE}/sessions/${sessionId}/chat-history`, { thread_id: threadId, messages })
     return response.data
   },
 
-  clearChatHistory: async (sessionId: string) => {
-    const response = await axios.delete(`${API_BASE}/sessions/${sessionId}/chat-history`)
+  deleteChatThread: async (sessionId: string, threadId: string) => {
+    const response = await axios.delete(`${API_BASE}/sessions/${sessionId}/chat-threads/${threadId}`)
     return response.data
   },
 

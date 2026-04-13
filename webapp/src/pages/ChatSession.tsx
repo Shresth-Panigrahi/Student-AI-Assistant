@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, Sparkles, ChevronRight, ChevronDown, ChevronUp, ChevronLeft,
   Headphones, FileText, Layers, HelpCircle, GitFork, Lock, Plus, X,
-  RefreshCw, Download, Play, Pause, Trophy, Share2, Database, Send, MessageSquarePlus
+  RefreshCw, Download, Play, Pause, Trophy, Share2, Database, Send, MessageSquarePlus,
+  History, Clock, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react'
 import { api } from '@/services/api'
 import { format } from 'date-fns'
@@ -58,6 +59,17 @@ interface ChatMessage {
   rag_used?: boolean
   think_mode?: boolean
   timestamp?: Date
+}
+
+interface ChatHistoryEntry {
+  session_id: string
+  session_name: string
+  thread_id: string
+  thread_title: string
+  message_count: number
+  last_message: { role: string; content: string; timestamp: string }
+  created_at: string
+  updated_at: string
 }
 
 type ActiveFeature = null | 'audio' | 'report' | 'flashcards' | 'qa' | 'graph' | 'chat'
@@ -148,6 +160,9 @@ export default function ChatSession() {
   const [chatThinkMode, setChatThinkMode] = useState(false)
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
   const [chatHistoryLoaded, setChatHistoryLoaded] = useState(false)
+  const [chatHistories, setChatHistories] = useState<ChatHistoryEntry[]>([])
+  const [showChatSidebar, setShowChatSidebar] = useState(true)
+  const [activeThreadId, setActiveThreadId] = useState<string>(() => crypto.randomUUID())
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // ─── Load Session ────────────────────────────────────────────
@@ -263,7 +278,7 @@ export default function ChatSession() {
     const loadHistory = async () => {
       try {
         setChatLoading(true)
-        const res = await api.getChatHistory(sessionId)
+        const res = await api.getChatHistory(sessionId, activeThreadId)
         if (res.success && res.messages && res.messages.length > 0) {
           const restored: ChatMessage[] = res.messages.map((m: any) => ({
             role: m.role,
@@ -283,7 +298,23 @@ export default function ChatSession() {
       }
     }
     loadHistory()
-  }, [activeFeature, sessionId, chatHistoryLoaded])
+  }, [activeFeature, sessionId, chatHistoryLoaded, activeThreadId])
+
+  // ─── Load all chat histories for sidebar ───────────────────
+  useEffect(() => {
+    if (activeFeature !== 'chat') return
+    const loadAllHistories = async () => {
+      try {
+        const res = await api.getAllChatHistories()
+        if (res.success) {
+          setChatHistories(res.histories || [])
+        }
+      } catch (e) {
+        console.error('Failed to load chat histories:', e)
+      }
+    }
+    loadAllHistories()
+  }, [activeFeature, chatMessages.length])
 
   // ─── Auto-scroll chat ──────────────────────────────────────
   useEffect(() => {
@@ -447,15 +478,20 @@ export default function ChatSession() {
       }
       setChatMessages(prev => {
         const updated = [...prev, assistantMsg]
-        // Auto-save chat history (fire-and-forget)
-        api.saveChatHistory(sessionId!, updated.map(m => ({
+        // Auto-save chat thread (fire-and-forget)
+        api.saveChatHistory(sessionId!, activeThreadId, updated.map(m => ({
           role: m.role,
           content: m.content,
           sources: m.sources,
           rag_used: m.rag_used,
           think_mode: m.think_mode,
           timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp
-        }))).catch(e => console.error('Failed to save chat history:', e))
+        }))).then(() => {
+          // Refresh sidebar after save
+          api.getAllChatHistories().then(r => {
+            if (r.success) setChatHistories(r.histories || [])
+          })
+        }).catch(e => console.error('Failed to save chat history:', e))
         return updated
       })
     } catch (e: any) {
@@ -653,14 +689,6 @@ export default function ChatSession() {
         ? { text: 'AI Enhanced', style: 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/30' }
         : undefined
     },
-    {
-      id: null,
-      icon: <GitFork className="w-5 h-5 text-[#7c3aed] rotate-90" />,
-      title: 'Mindmap',
-      subtitle: 'Visual concept map',
-      badge: { text: 'NEXT UPDATE', style: 'bg-gray-800 text-gray-500' },
-      disabled: true
-    }
   ]
 
   // ─── RENDER ────────────────────────────────────────────────
@@ -1580,163 +1608,277 @@ export default function ChatSession() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.25, ease: 'easeOut' }}
-              className="h-full flex flex-col"
+              className="h-full flex"
             >
-              {/* Top bar */}
-              <div className="sticky top-0 bg-[#0a0a0a]/80 backdrop-blur-sm border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
-                <div className="flex items-center gap-3">
-                  <Send className="w-5 h-5 text-[#7c3aed]" />
-                  <span className="font-bold text-white">Ask AI</span>
-                  {ragStatus?.indexed && (
-                    <span className="bg-emerald-900/30 border border-emerald-500/30 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <Database className="w-2.5 h-2.5" />
-                      AI Enhanced · {ragStatus.chunk_count} chunks
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-3">
-                  {/* New Chat button */}
-                  {chatMessages.length > 0 && (
+              {/* ─── Chat History Sidebar ─── */}
+              {showChatSidebar && (
+                <div className="w-[260px] min-w-[220px] border-r border-white/5 bg-[#111111] flex flex-col shrink-0">
+                  {/* Sidebar header */}
+                  <div className="p-4 border-b border-white/5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <History className="w-4 h-4 text-purple-400" />
+                      <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Chat History</span>
+                    </div>
                     <button
-                      onClick={async () => {
-                        if (!sessionId) return
+                      onClick={() => setShowChatSidebar(false)}
+                      className="p-1 rounded-lg text-gray-500 hover:text-white hover:bg-white/5 transition-all"
+                      title="Hide sidebar"
+                    >
+                      <PanelLeftClose className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* New chat for current session */}
+                  <div className="p-3">
+                    <button
+                      onClick={() => {
+                        // Start a new thread — old thread is already saved
+                        setActiveThreadId(crypto.randomUUID())
                         setChatMessages([])
                         setChatHistoryLoaded(true)
-                        try {
-                          await api.clearChatHistory(sessionId)
-                        } catch (e) {
-                          console.error('Failed to clear chat history:', e)
-                        }
                       }}
-                      className="flex items-center gap-1.5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:border-purple-500/40 hover:bg-purple-500/10 transition-all duration-200"
-                      title="Start a new conversation"
+                      className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-purple-500/30 text-purple-300 text-xs hover:bg-purple-500/10 hover:border-purple-500/50 transition-all duration-200"
                     >
-                      <MessageSquarePlus className="w-3.5 h-3.5" />
+                      <MessageSquarePlus className="w-4 h-4" />
                       New Chat
                     </button>
-                  )}
-                  {/* Think mode toggle */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={chatThinkMode}
-                    onChange={(e) => setChatThinkMode(e.target.checked)}
-                    className="w-3.5 h-3.5 rounded border-gray-600 bg-[#1a1a1a] text-purple-600 focus:ring-purple-500 focus:ring-offset-0"
-                  />
-                  <span className="text-[10px] text-gray-400">
-                    {chatThinkMode ? '🧠 Think Mode' : '📄 Transcript Only'}
-                  </span>
-                </label>
-                </div>
-              </div>
-
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-                {chatMessages.length === 0 && (
-                  <div className="h-full flex flex-col items-center justify-center gap-4 text-center">
-                    <div className="w-16 h-16 rounded-2xl bg-purple-500/10 flex items-center justify-center">
-                      <Send className="w-8 h-8 text-purple-400" />
-                    </div>
-                    <h3 className="text-lg font-semibold text-white">Ask about this lecture</h3>
-                    <p className="text-sm text-gray-500 max-w-md">
-                      {ragStatus?.indexed
-                        ? 'AI Enhanced mode active — your questions are answered using precise semantic retrieval from the lecture transcript.'
-                        : 'Ask any question about the lecture content. The AI will search through the transcript to find relevant answers.'}
-                    </p>
                   </div>
-                )}
 
-                {chatMessages.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] ${msg.role === 'user' ? 'order-last' : ''}`}>
-                      <div className={`rounded-2xl px-4 py-3 ${
-                        msg.role === 'user'
-                          ? 'bg-purple-600/20 border border-purple-500/20'
-                          : 'bg-[#1a1a1a] border border-white/[0.08]'
-                      }`}>
-                        <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                  {/* History list */}
+                  <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-1">
+                    {chatHistories.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
+                        <History className="w-8 h-8 text-gray-700" />
+                        <p className="text-[11px] text-gray-600">No chat history yet</p>
+                        <p className="text-[10px] text-gray-700">Ask a question to get started</p>
                       </div>
-
-                      {/* RAG indicator + timestamp */}
-                      {msg.role === 'assistant' && (
-                        <div className="flex items-center gap-2 mt-1.5 ml-1">
-                          {msg.rag_used && (
-                            <div className="flex items-center gap-1">
-                              <Database className="w-2.5 h-2.5 text-purple-400" />
-                              <span className="text-[10px] text-purple-400">RAG</span>
-                            </div>
-                          )}
-                          {msg.think_mode && (
-                            <span className="text-[10px] text-amber-400">🧠 Think</span>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Source citations */}
-                      {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
-                        <div className="mt-2 ml-1">
-                          <button
-                            onClick={() => setExpandedSources(prev => ({ ...prev, [i]: !prev[i] }))}
-                            className="flex items-center gap-1 text-[10px] text-gray-600 hover:text-gray-400 transition-all"
+                    ) : (
+                      chatHistories.map((entry) => {
+                        const isCurrentThread = entry.thread_id === activeThreadId
+                        const isSameSession = entry.session_id === sessionId
+                        return (
+                          <div
+                            key={entry.thread_id}
+                            className={`w-full text-left rounded-xl p-3 transition-all duration-200 group relative ${
+                              isCurrentThread
+                                ? 'bg-purple-500/10 border border-purple-500/20'
+                                : 'hover:bg-white/[0.04] border border-transparent hover:border-white/[0.08]'
+                            }`}
                           >
-                            <ChevronDown className={`w-3 h-3 transition-transform ${expandedSources[i] ? 'rotate-180' : ''}`} />
-                            View sources ({msg.sources.length})
-                          </button>
-                          {expandedSources[i] && (
-                            <div className="mt-2 space-y-1.5">
-                              {msg.sources.slice(0, 3).map((src, j) => (
-                                <div key={j} className="bg-white/[0.03] border border-white/[0.08] rounded-lg p-2">
-                                  <p className="text-[10px] text-gray-500 leading-relaxed">{src.text}</p>
-                                  <div className="mt-1.5 h-0.5 rounded-full bg-purple-500/20 overflow-hidden">
-                                    <div
-                                      className="h-full rounded-full bg-purple-500/60"
-                                      style={{ width: `${Math.min(src.relevance * 100, 100)}%` }}
-                                    />
-                                  </div>
+                            <button
+                              className="w-full text-left"
+                              onClick={async () => {
+                                if (isCurrentThread) return
+                                if (isSameSession) {
+                                  // Load this thread's messages inline
+                                  setActiveThreadId(entry.thread_id)
+                                  setChatHistoryLoaded(false)
+                                  setChatMessages([])
+                                } else {
+                                  // Navigate to the other session, then load thread
+                                  navigate(`/chat/${entry.session_id}`)
+                                }
+                              }}
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={`text-xs font-medium truncate flex-1 ${
+                                  isCurrentThread ? 'text-purple-300' : 'text-gray-300'
+                                }`}>
+                                  {entry.thread_title}
+                                </span>
+                                {isCurrentThread && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 shrink-0">Active</span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-gray-500 truncate leading-relaxed">
+                                {entry.session_name}
+                              </p>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <div className="flex items-center gap-1 text-[9px] text-gray-600">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {entry.updated_at ? new Date(entry.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
                                 </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                                <span className="text-[9px] text-gray-700">·</span>
+                                <span className="text-[9px] text-gray-600">{entry.message_count} msgs</span>
+                              </div>
+                            </button>
+                            {/* Delete thread button */}
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation()
+                                try {
+                                  await api.deleteChatThread(entry.session_id, entry.thread_id)
+                                  if (isCurrentThread) {
+                                    setActiveThreadId(crypto.randomUUID())
+                                    setChatMessages([])
+                                    setChatHistoryLoaded(true)
+                                  }
+                                  const res = await api.getAllChatHistories()
+                                  if (res.success) setChatHistories(res.histories || [])
+                                } catch (err) {
+                                  console.error('Failed to delete thread:', err)
+                                }
+                              }}
+                              className="absolute top-2 right-2 p-1 rounded-lg text-gray-700 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                              title="Delete this chat"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )
+                      })
+                    )}
                   </div>
-                ))}
+                </div>
+              )}
 
-                {chatLoading && (
-                  <div className="flex justify-start">
-                    <div className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" />
-                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '0.1s' }} />
-                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '0.2s' }} />
+              {/* ─── Main Chat Area ─── */}
+              <div className="flex-1 flex flex-col min-w-0">
+                {/* Top bar */}
+                <div className="sticky top-0 bg-[#0a0a0a]/80 backdrop-blur-sm border-b border-white/5 px-6 py-4 flex items-center justify-between z-10">
+                  <div className="flex items-center gap-3">
+                    {!showChatSidebar && (
+                      <button
+                        onClick={() => setShowChatSidebar(true)}
+                        className="p-1.5 rounded-lg text-gray-500 hover:text-white hover:bg-white/5 transition-all"
+                        title="Show chat history"
+                      >
+                        <PanelLeftOpen className="w-4 h-4" />
+                      </button>
+                    )}
+                    <Send className="w-5 h-5 text-[#7c3aed]" />
+                    <span className="font-bold text-white">Ask AI</span>
+                    {ragStatus?.indexed && (
+                      <span className="bg-emerald-900/30 border border-emerald-500/30 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <Database className="w-2.5 h-2.5" />
+                        AI Enhanced · {ragStatus.chunk_count} chunks
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {/* Think mode toggle */}
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={chatThinkMode}
+                        onChange={(e) => setChatThinkMode(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded border-gray-600 bg-[#1a1a1a] text-purple-600 focus:ring-purple-500 focus:ring-offset-0"
+                      />
+                      <span className="text-[10px] text-gray-400">
+                        {chatThinkMode ? '🧠 Think Mode' : '📄 Transcript Only'}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Messages */}
+                <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+                  {chatMessages.length === 0 && !chatLoading && (
+                    <div className="h-full flex flex-col items-center justify-center gap-4 text-center">
+                      <div className="w-16 h-16 rounded-2xl bg-purple-500/10 flex items-center justify-center">
+                        <Send className="w-8 h-8 text-purple-400" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-white">Ask about this lecture</h3>
+                      <p className="text-sm text-gray-500 max-w-md">
+                        {ragStatus?.indexed
+                          ? 'AI Enhanced mode active — your questions are answered using precise semantic retrieval from the lecture transcript.'
+                          : 'Ask any question about the lecture content. The AI will search through the transcript to find relevant answers.'}
+                      </p>
+                    </div>
+                  )}
+
+                  {chatMessages.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[80%] ${msg.role === 'user' ? 'order-last' : ''}`}>
+                        <div className={`rounded-2xl px-4 py-3 ${
+                          msg.role === 'user'
+                            ? 'bg-purple-600/20 border border-purple-500/20'
+                            : 'bg-[#1a1a1a] border border-white/[0.08]'
+                        }`}>
+                          <p className="text-sm text-gray-200 leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                        </div>
+
+                        {/* RAG indicator + timestamp */}
+                        {msg.role === 'assistant' && (
+                          <div className="flex items-center gap-2 mt-1.5 ml-1">
+                            {msg.rag_used && (
+                              <div className="flex items-center gap-1">
+                                <Database className="w-2.5 h-2.5 text-purple-400" />
+                                <span className="text-[10px] text-purple-400">RAG</span>
+                              </div>
+                            )}
+                            {msg.think_mode && (
+                              <span className="text-[10px] text-amber-400">🧠 Think</span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Source citations */}
+                        {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
+                          <div className="mt-2 ml-1">
+                            <button
+                              onClick={() => setExpandedSources(prev => ({ ...prev, [i]: !prev[i] }))}
+                              className="flex items-center gap-1 text-[10px] text-gray-600 hover:text-gray-400 transition-all"
+                            >
+                              <ChevronDown className={`w-3 h-3 transition-transform ${expandedSources[i] ? 'rotate-180' : ''}`} />
+                              View sources ({msg.sources.length})
+                            </button>
+                            {expandedSources[i] && (
+                              <div className="mt-2 space-y-1.5">
+                                {msg.sources.slice(0, 3).map((src, j) => (
+                                  <div key={j} className="bg-white/[0.03] border border-white/[0.08] rounded-lg p-2">
+                                    <p className="text-[10px] text-gray-500 leading-relaxed">{src.text}</p>
+                                    <div className="mt-1.5 h-0.5 rounded-full bg-purple-500/20 overflow-hidden">
+                                      <div
+                                        className="h-full rounded-full bg-purple-500/60"
+                                        style={{ width: `${Math.min(src.relevance * 100, 100)}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
+                  ))}
+
+                  {chatLoading && (
+                    <div className="flex justify-start">
+                      <div className="bg-[#1a1a1a] border border-white/[0.08] rounded-2xl px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" />
+                          <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '0.1s' }} />
+                          <div className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: '0.2s' }} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Input */}
+                <div className="border-t border-white/5 px-6 py-4">
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleChatSend()}
+                      placeholder={chatThinkMode ? 'Ask anything about this lecture...' : 'Ask about the transcript...'}
+                      className="flex-1 bg-[#1a1a1a] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/40 transition-all"
+                      disabled={chatLoading}
+                    />
+                    <button
+                      onClick={handleChatSend}
+                      disabled={chatLoading || !chatInput.trim()}
+                      className="w-10 h-10 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all"
+                    >
+                      <Send className="w-4 h-4 text-white" />
+                    </button>
                   </div>
-                )}
-
-                <div ref={chatEndRef} />
-              </div>
-
-              {/* Input */}
-              <div className="border-t border-white/5 px-6 py-4">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleChatSend()}
-                    placeholder={chatThinkMode ? 'Ask anything about this lecture...' : 'Ask about the transcript...'}
-                    className="flex-1 bg-[#1a1a1a] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-purple-500/40 transition-all"
-                    disabled={chatLoading}
-                  />
-                  <button
-                    onClick={handleChatSend}
-                    disabled={chatLoading || !chatInput.trim()}
-                    className="w-10 h-10 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all"
-                  >
-                    <Send className="w-4 h-4 text-white" />
-                  </button>
                 </div>
               </div>
             </motion.div>
